@@ -1,4 +1,4 @@
-('C:\\Users\\nratt\\Documents\\Software\\python\\fertilizer_calculator\\build\\fertilizers_v2\\PYZ-00.pyz',
+('C:\\Users\\nratt\\Documents\\Software\\fertilizer_calculator\\build\\fertilizers_v2\\PYZ-00.pyz',
  [('_compat_pickle', 'C:\\Python312\\Lib\\_compat_pickle.py', 'PYMODULE'),
   ('_compression', 'C:\\Python312\\Lib\\_compression.py', 'PYMODULE'),
   ('_py_abc', 'C:\\Python312\\Lib\\_py_abc.py', 'PYMODULE'),
