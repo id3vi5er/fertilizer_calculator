@@ -2,9 +2,9 @@
 
 ## Description
 
-Plant Fertilizer Calculator is a Python application designed to help users manage plant fertilization schedules and calculate appropriate nutrient dosages. It allows users to store data for individual plants, track their growth stages, and determine fertilizer amounts based on pre-defined schedules and water quantities. The application features a graphical user interface (GUI) built with Tkinter.
+Plant Fertilizer Calculator is a Python application designed to help users manage plant fertilization schedules and calculate appropriate nutrient dosages. It allows users to store data for individual plants, track their growth stages, and determine fertilizer amounts based on customizable schedules and water quantities. The application features a graphical user interface (GUI) built with Tkinter.
 
-It reads plant data from `pflanzendaten.csv` and fertilization schedules/EC target values from `fertilizer_config.json`.
+It reads plant data from `pflanzendaten.csv`, fertilization schemes and EC target values from `fertilizer_config.json`, and application status (like last EC-Helper usage) from `app_status.json`.
 
 ## Features
 
@@ -12,80 +12,150 @@ It reads plant data from `pflanzendaten.csv` and fertilization schedules/EC targ
     *   Store and manage plant details: name, germination date, genetics, and custom notes.
     *   Automatically calculate the current growth week of a plant.
     *   Add new plants and delete existing ones.
+*   **Fertilization Scheme Management:**
+    *   **Multiple Schemes:** Create, manage, and switch between different fertilization schemes (e.g., "Default Veg," "Aggressive Bloom").
+    *   **Active Scheme:** Set one scheme as active, which will be used for all calculations and plant information displays.
+    *   **Scheme Operations:** Create new schemes (optionally by copying an existing one), rename schemes, and delete schemes (with safeguards for the last one).
+*   **Custom Fertilizer Management (within Schemes):**
+    *   For each scheme, define custom fertilizer types.
+    *   **Fertilizer Details:** For each fertilizer, specify:
+        *   Name.
+        *   EC Contribution Factor (in µS/cm per ml/L), used by the EC-Helper.
+        *   Weekly dosage schedule (ml/L per week).
+    *   **Fertilizer Operations:** Add new fertilizers, edit existing ones (name, EC factor, schedule), and delete fertilizers from a scheme.
 *   **Fertilizer Calculation:**
-    *   Load customizable fertilizer schedules from `fertilizer_config.json`. Each fertilizer can have different dosage recommendations per week.
-    *   Load target Electrical Conductivity (EC) values for each growth week from `fertilizer_config.json`.
-    *   Calculate the required fertilizer amount (in ml) based on the plant's current week, the desired water amount, and selected fertilizer types.
-    *   Display the target EC value for the plant's current week.
+    *   Uses the fertilizer schedules from the *active* scheme.
+    *   Calculates the required fertilizer amount (in ml) based on the plant's current week, the desired water amount, and selected fertilizer types from the active scheme.
+    *   Displays the target EC value for the plant's current week based on the active scheme.
 *   **EC Helper Tool:**
     *   Assists in adjusting the nutrient solution to a specific target EC value.
-    *   Calculates the amount of growth or bloom fertilizer needed to reach the target EC based on the current EC of the water and the total water volume.
+    *   Requires selection of a specific fertilizer from the active scheme.
+    *   Uses the selected fertilizer's defined `ec_contribution_factor` for accurate calculation.
+    *   Records a timestamp of its last successful usage.
 *   **User-Friendly Interface:**
     *   GUI built with Tkinter for easy interaction.
     *   Dropdown menus for plant selection.
     *   Input fields for water amount.
     *   Checkboxes to select multiple fertilizers for calculation.
     *   A dedicated section for plant-specific notes.
+    *   Scheme management window for handling schemes and their fertilizers.
+*   **Status Tracking:**
+    *   Remembers when the EC Helper tool was last used via `app_status.json`.
 
 ## File Structure
 
-*   `fertilizers_v2.py`: Main Python script for the application (contains the GUI and logic).
+*   `fertilizers_v2.py`: Main Python script for the application.
 *   `pflanzendaten.csv`: CSV file storing data for each plant (Name, Germination Date, Genetics, Info).
-*   `fertilizer_config.json`: JSON file containing:
-    *   `fertilizer_data`: Schedules for different fertilizers (dosage per week).
-    *   `ec_values`: Target EC values (in mS/cm) per growth week.
+*   `fertilizer_config.json`: JSON file containing the core configuration for fertilization schemes.
+    *   `active_scheme_name`: (String) The name of the scheme currently in use.
+    *   `schemes`: (Object) A collection where each key is a scheme name.
+        *   Each scheme object contains:
+            *   `fertilizer_data`: (Object) A collection where each key is a fertilizer name.
+                *   Each fertilizer object contains:
+                    *   `schedule`: (Object) Weekly dosage, e.g., `{"1": 0.5, "2": 1.0}` (ml/L).
+                    *   `ec_contribution_factor`: (Number) The EC increase in µS/cm for 1 ml of this fertilizer in 1L of water.
+            *   `ec_values`: (Object) Target EC values (in mS/cm) per growth week for this scheme, e.g., `{"1": 0.4, "2": 0.6}`.
+    *   `default_ec_factors`: (Object) Default EC contribution factors, e.g., `{"growth": 478, "bloom": 430}`. These are primarily fallback values or for general reference.
+*   `app_status.json`: JSON file storing application status information.
+    *   `last_ec_helper_usage`: (String) Timestamp of the last successful EC-Helper calculation (e.g., "2023-10-27 14:30:00").
 *   `fertilizers.ico`: Icon file for the application.
 *   `.gitignore`: Specifies intentionally untracked files that Git should ignore.
-*   `build/`, `dist/`: Directories typically generated by PyInstaller during the executable creation process.
-*   `*.spec`: PyInstaller specification files for building executables.
+*   `build/`, `dist/`: Directories typically generated by PyInstaller.
+*   `*.spec`: PyInstaller specification files.
 
 ## Setup and Running the Application
 
 1.  **Prerequisites:**
-    *   Python 3.x installed on your system.
-    *   Tkinter library (usually included with standard Python installations).
+    *   Python 3.x (preferably Python 3.12 for `tkinter` compatibility as tested) installed on your system.
+    *   Tkinter library (usually included with standard Python installations; may need to be installed separately on some Linux distributions, e.g., `sudo apt-get install python3-tk`).
 
 2.  **Configuration:**
     *   **Plant Data (`pflanzendaten.csv`):**
-        *   If this file doesn't exist, the application will create it with a header row.
-        *   You can add plants through the application's UI ("Neue Pflanze anlegen" button).
-        *   The CSV columns are: `Pflanzenname,Keimdatum,Genetik,Infos`.
-    *   **Fertilizer Schedules (`fertilizer_config.json`):**
-        *   This file is crucial for the application to function correctly.
-        *   It must contain `fertilizer_data` (listing various fertilizers and their dosage in ml/L per week) and `ec_values` (target EC in mS/cm per week).
-        *   The application expects weeks as integer keys (e.g., "1", "2") and dosages/EC values as numbers.
+        *   If this file doesn't exist, the application will create it.
+        *   Plants can be added via the UI.
+    *   **Fertilizer Schemes (`fertilizer_config.json`):**
+        *   This file is crucial. A default version with the new structure will be created if missing, but it's recommended to customize it.
         *   Example structure:
             ```json
             {
-              "fertilizer_data": {
-                "MyGrowthBooster": {"1": 0.5, "2": 1.0, "3": 1.5},
-                "MyBloomEnhancer": {"8": 1.0, "9": 2.0}
+              "active_scheme_name": "My First Scheme",
+              "schemes": {
+                "My First Scheme": {
+                  "fertilizer_data": {
+                    "GroBoost (EC: 400)": {
+                      "schedule": { "1": 0.5, "2": 1.0, "3": 1.2, "4": 1.5 },
+                      "ec_contribution_factor": 400
+                    },
+                    "BloomMax (EC: 350)": {
+                      "schedule": { "5": 1.0, "6": 1.5, "7": 2.0, "8": 2.0 },
+                      "ec_contribution_factor": 350
+                    },
+                    "CalMag (EC: 200)": {
+                       "schedule": { "1": 0.3, "2": 0.3, "3": 0.4, "4": 0.4, "5": 0.5, "6": 0.5, "7": 0.5, "8": 0.5},
+                       "ec_contribution_factor": 200
+                    }
+                  },
+                  "ec_values": {
+                    "1": 0.6, "2": 0.8, "3": 1.0, "4": 1.2,
+                    "5": 1.2, "6": 1.4, "7": 1.5, "8": 1.5
+                  }
+                }
               },
-              "ec_values": {
-                "1": 0.4, "2": 0.6, "3": 0.8, "8": 1.2, "9": 1.4
+              "default_ec_factors": {
+                "growth": 478,
+                "bloom": 430
               }
             }
             ```
+    *   **Application Status (`app_status.json`):**
+        *   This file is created and managed automatically by the application to store information like the last time the EC Helper tool was used.
 
 3.  **Running the Script:**
     *   Navigate to the directory containing `fertilizers_v2.py`.
-    *   Run the script from your terminal:
+    *   Run the script from your terminal (use `python3.12` if `python3` points to an older version without compatible Tkinter):
+        ```bash
+        python3.12 fertilizers_v2.py
+        ```
+        or
         ```bash
         python fertilizers_v2.py
         ```
+    *   The application window should open.
 
-    *   The application window should open. If `fertilizer_config.json` is missing or malformed, an error message will be displayed, and the application will likely close.
+## How to Use New Features
+
+### Scheme and Fertilizer Management
+1.  **Access Scheme Manager:** Click the "Manage Schemes" button on the main window.
+2.  **Scheme Operations:**
+    *   **View Schemes:** The left listbox shows all available schemes. The active scheme is highlighted.
+    *   **Set Active:** Select a scheme and click "Als Aktiv" to make it the current scheme for calculations.
+    *   **Create New:** Click "Neu". Enter a name. The new scheme can be a copy of the selected scheme, "Default Scheme" (if it exists), or a blank template.
+    *   **Rename:** Select a scheme, click "Umbenennen", and enter the new name.
+    *   **Delete:** Select a scheme and click "Löschen". The last scheme cannot be deleted. If the active scheme is deleted, another will become active.
+3.  **Fertilizer Operations (within a selected scheme):**
+    *   **View Fertilizers:** Select a scheme. The right listbox shows its fertilizers and their EC factors.
+    *   **Add Fertilizer:** Click "Hinzufügen" (Add). A dialog will appear:
+        *   **Name:** Enter the fertilizer name.
+        *   **EC Beitrag:** Enter the EC contribution factor (µS/cm per ml/L).
+        *   **Düngeschema:** Enter the weekly schedule as comma-separated "week:dosage" pairs (e.g., `1:0.5, 2:1.0, 3:1.2`).
+    *   **Edit Fertilizer:** Select a fertilizer, click "Bearbeiten" (Edit). The same dialog appears, pre-filled.
+    *   **Delete Fertilizer:** Select a fertilizer, click "Löschen" (Delete), and confirm.
+4.  **Saving:** All changes to schemes and fertilizers are saved to `fertilizer_config.json` automatically upon successful completion of an operation.
+5.  **Closing:** Click "Schließen" to close the Scheme Manager.
+
+### EC Helper Tool
+1.  Click the "EC-Helper" button on the main window.
+2.  Enter your current water EC ("Aktueller EC") and the desired target EC ("Soll-EC").
+3.  **Select Fertilizer:** Choose the specific fertilizer you will use for adjustment from the dropdown menu. This list is populated from the fertilizers defined in your *active* scheme.
+4.  Click "Düngermenge berechnen".
+5.  The tool will display the amount of the *selected fertilizer* needed, using its specific `ec_contribution_factor`.
+6.  The time of this calculation will be saved and displayed on the main window.
 
 ## Future Enhancements (Feature Ideas)
 
-1.  **Graphical Data Visualization:**
-    *   Implement charts to visualize plant growth (if height/other metrics are tracked) and fertilization history (amounts applied, EC values over time). This would provide users with a clearer understanding of trends and plant development.
-
-2.  **Advanced Configuration Options & Customization:**
-    *   Allow users to define custom fertilizer types and their specific EC contribution factors directly within the application's UI or a dedicated settings panel.
-    *   Enable the creation and management of multiple, named fertilization schemes (e.g., "Aggressive Bloom," "Mild Veg") that users can switch between.
-    *   Add an option to specify different EC target values for various growth mediums (e.g., soil, coco, hydroponics).
-
-3.  **Reminder/Logging System:**
-    *   Introduce a system for logging past fertilization events (date, amounts, observations).
-    *   Allow users to set reminders for future fertilizations based on their schedules or customizable intervals, helping maintain consistency.
+*   **Graphical Data Visualization:** Charts for plant growth, fertilization history.
+*   **Advanced EC/pH Tracking:** Log actual EC/pH values of nutrient solutions.
+*   **Nutrient Profiles:** Allow defining N-P-K values for fertilizers and estimate nutrient ratios.
+*   **Data Export/Import:** More robust options for backing up and sharing configuration/plant data.
+*   **Improved UI/UX:** Consider a more modern theme or layout restructuring for better usability as features grow.
+*   **EC Values for Schemes:** Allow editing EC target values per week directly within the scheme manager UI.

@@ -22,14 +22,15 @@ import os
 from typing import Dict, Any, Optional # For type hinting
 import json # Import json module
 import sys # For sys.exit
+import copy # For deep copying schemes
+from tkinter import simpledialog # For simple input dialogs
 
 # --- Konstanten ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_FILENAME = os.path.join(SCRIPT_DIR, 'pflanzendaten.csv')
 CONFIG_FILENAME = os.path.join(SCRIPT_DIR, 'fertilizer_config.json') # Config file name
+APP_STATUS_FILENAME = os.path.join(SCRIPT_DIR, 'app_status.json') # For storing app status like timestamps
 CSV_HEADER = ["Pflanzenname", "Keimdatum", "Genetik", "Infos"]
-EC_FACTOR_WACHSTUM = 478 # EC increase in µS/cm per ml/L for Wachstumsdünger
-EC_FACTOR_BLUETE = 430   # EC increase in µS/cm per ml/L for Blütendünger
 
 # --- Datenmanagement ---
 
@@ -156,11 +157,13 @@ def calculate_fertilizer_amount(week: int, water_amount: float, fertilizer_type:
         return None
 
     # Prüfen, ob der angegebene Düngertyp in den geladenen Daten existiert.
-    if fertilizer_type not in F_DATA:
-        print(f"Warnung: Unbekannter Düngertyp '{fertilizer_type}'")
-        return None # Düngertyp nicht in Konfiguration gefunden.
+    if F_DATA is None or fertilizer_type not in F_DATA:
+        print(f"Warnung: Unbekannter Düngertyp '{fertilizer_type}' oder F_DATA nicht initialisiert.")
+        return None # Düngertyp nicht in Konfiguration gefunden oder F_DATA leer.
 
-    current_fertilizer_schedule = F_DATA[fertilizer_type]
+    fertilizer_details = F_DATA[fertilizer_type] # Enthält 'schedule' und 'ec_contribution_factor'
+    current_fertilizer_schedule = fertilizer_details.get("schedule")
+
     # Prüfen, ob für diesen Dünger ein Schema vorhanden ist.
     if not current_fertilizer_schedule: # Leeres Schema
         print(f"Warnung: Leeres Düngeschema für '{fertilizer_type}'")
@@ -213,126 +216,211 @@ def get_ec_value(week: int) -> Optional[float]:
 
 
 # --- Konfigurationsladung ---
-def load_fertilizer_config() -> tuple[Optional[Dict[str, Dict[int, float]]], Optional[Dict[int, float]]]:
+def load_fertilizer_config() -> tuple[Optional[Dict[str, Any]], Optional[str], Optional[Dict[str, float]]]:
     """
-    Lädt Düngemitteldaten (Schemata) und EC-Zielwerte aus der JSON-Konfigurationsdatei (`fertilizer_config.json`).
+    Lädt die gesamte Düngerkonfiguration aus der JSON-Datei (`fertilizer_config.json`),
+    einschließlich aller Schemata, des aktiven Schemas und der Standard-EC-Faktoren.
 
-    Die Funktion liest die JSON-Datei, extrahiert die Abschnitte "fertilizer_data" und "ec_values".
-    Wichtig: Die Wochenschlüssel in der JSON-Datei (z.B. "1", "2") werden in Integer-Schlüssel
-    für die Python-Dictionaries konvertiert. Dosierungen und EC-Werte werden als float interpretiert.
+    Die Funktion liest die JSON-Datei und verarbeitet die Struktur:
+    - "active_scheme_name": Name des standardmäßig aktiven Schemas.
+    - "schemes": Ein Dictionary, das alle verfügbaren Düngeschemata enthält.
+        - Jedes Schema enthält "fertilizer_data" und "ec_values".
+        - Wochenschlüssel in "schedule" und "ec_values" werden zu Integer konvertiert.
+        - Dosierungen, EC-Werte und "ec_contribution_factor" werden als float interpretiert.
+    - "default_ec_factors": Enthält Standard-EC-Faktoren für "growth" und "bloom".
 
     Returns:
-        tuple[Optional[Dict[str, Dict[int, float]]], Optional[Dict[int, float]]]:
-        Ein Tupel bestehend aus zwei Elementen:
-        1.  Ein Dictionary für Düngemitteldaten (`processed_f_data`):
-            - Schlüssel: Düngername (str).
-            - Wert: Ein weiteres Dictionary mit Integer-Wochennummern als Schlüssel und float-Dosierungen als Werte.
-        2.  Ein Dictionary für EC-Zielwerte (`processed_ec_values`):
-            - Schlüssel: Integer-Wochennummer.
-            - Wert: float EC-Zielwert.
-        Im Fehlerfall (z.B. Datei nicht gefunden, JSON-Fehler) wird `(None, None)` zurückgegeben
-        und eine Fehlermeldung über `messagebox.showerror` angezeigt.
+        tuple[Optional[Dict[str, Any]], Optional[str], Optional[Dict[str, float]]]:
+        Ein Tupel bestehend aus drei Elementen:
+        1.  `all_schemes_data` (Dict[str, Any]): Ein Dictionary aller geladenen Schemata.
+            - Schlüssel: Schemaname (str).
+            - Wert: Ein Dictionary mit den Daten des Schemas, einschließlich
+              verarbeiteter "fertilizer_data" und "ec_values".
+        2.  `active_scheme_name` (str): Der Name des aktiven Schemas.
+        3.  `default_ec_factors` (Dict[str, float]): Die Standard-EC-Faktoren.
+        Im Fehlerfall (z.B. Datei nicht gefunden, JSON-Fehler, fehlende Hauptschlüssel)
+        wird `(None, None, None)` zurückgegeben und eine Fehlermeldung angezeigt.
 
     Fehlerbehandlung:
-        - `FileNotFoundError`: Wenn `CONFIG_FILENAME` nicht existiert.
-        - `json.JSONDecodeError`: Wenn die JSON-Datei fehlerhaft formatiert ist.
-        - `ValueError`: Wenn Wochenschlüssel oder Werte nicht korrekt in int/float konvertiert werden können.
-        - Allgemeine `Exception`: Für andere unerwartete Fehler beim Laden.
+        - `FileNotFoundError`, `json.JSONDecodeError`, `ValueError`, `Exception` wie zuvor.
+        - Zusätzliche Prüfungen auf das Vorhandensein von "schemes", "active_scheme_name",
+          "default_ec_factors" in der JSON-Datei.
     """
     try:
         with open(CONFIG_FILENAME, 'r', encoding='utf-8') as f:
-            config_json = json.load(f) # JSON-Datei einlesen
+            config_json = json.load(f)
 
-        # Verarbeitung der Düngemitteldaten
-        fertilizer_data_json = config_json.get("fertilizer_data", {}) # Default: leeres Dict
-        processed_f_data: Dict[str, Dict[int, float]] = {}
-        for f_type, schedule_json in fertilizer_data_json.items():
-            processed_schedule: Dict[int, float] = {}
-            for week_str, dosage in schedule_json.items():
+        active_scheme_name = config_json.get("active_scheme_name")
+        schemes_json = config_json.get("schemes")
+        default_ec_factors_json = config_json.get("default_ec_factors")
+
+        if not active_scheme_name or not schemes_json or default_ec_factors_json is None:
+            messagebox.showerror("Konfigurationsfehler",
+                                 f"Wichtige Schlüssel ('active_scheme_name', 'schemes', 'default_ec_factors') "
+                                 f"fehlen in '{CONFIG_FILENAME}'.")
+            return None, None, None
+
+        all_schemes_data: Dict[str, Any] = {}
+        for scheme_name, scheme_content in schemes_json.items():
+            fertilizer_data_json = scheme_content.get("fertilizer_data", {})
+            processed_f_data: Dict[str, Dict[str, Any]] = {}
+            for f_type, f_details_json in fertilizer_data_json.items():
+                schedule_json = f_details_json.get("schedule", {})
+                processed_schedule: Dict[int, float] = {}
+                for week_str, dosage in schedule_json.items():
+                    try:
+                        processed_schedule[int(week_str)] = float(dosage)
+                    except ValueError:
+                        print(f"Warnung: Ungültiger Wochenschlüssel oder Dosierung für {f_type} in Woche '{week_str}' im Schema '{scheme_name}'. Überspringe.")
+
+                ec_contribution = f_details_json.get("ec_contribution_factor")
+                if ec_contribution is None:
+                     print(f"Warnung: Fehlender 'ec_contribution_factor' für {f_type} im Schema '{scheme_name}'. Setze auf Placeholder 0.0.")
+                     ec_contribution_float = 0.0
+                else:
+                    try:
+                        ec_contribution_float = float(ec_contribution)
+                    except ValueError:
+                        print(f"Warnung: Ungültiger 'ec_contribution_factor' ({ec_contribution}) für {f_type} im Schema '{scheme_name}'. Setze auf Placeholder 0.0.")
+                        ec_contribution_float = 0.0
+
+                processed_f_data[f_type] = {
+                    "schedule": processed_schedule,
+                    "ec_contribution_factor": ec_contribution_float
+                }
+
+            ec_values_json = scheme_content.get("ec_values", {})
+            processed_ec_values: Dict[int, float] = {}
+            for week_str, ec_val in ec_values_json.items():
                 try:
-                    # Konvertiere Wochenschlüssel zu Integer und Dosierung zu Float
-                    processed_schedule[int(week_str)] = float(dosage)
+                    processed_ec_values[int(week_str)] = float(ec_val)
                 except ValueError:
-                    # Log für fehlerhafte Einträge in den Schemata
-                    print(f"Warnung: Ungültiger Wochenschlüssel oder Dosierungswert für {f_type} in Woche '{week_str}'. Überspringe.")
-            processed_f_data[f_type] = processed_schedule
+                    print(f"Warnung: Ungültiger Wochenschlüssel oder EC-Wert '{week_str}' im Schema '{scheme_name}'. Überspringe.")
 
-        # Verarbeitung der EC-Zielwerte
-        ec_values_json = config_json.get("ec_values", {}) # Default: leeres Dict
-        processed_ec_values: Dict[int, float] = {}
-        for week_str, ec_val in ec_values_json.items():
-            try:
-                # Konvertiere Wochenschlüssel zu Integer und EC-Wert zu Float
-                processed_ec_values[int(week_str)] = float(ec_val)
-            except ValueError:
-                # Log für fehlerhafte EC-Werte
-                print(f"Warnung: Ungültiger Wochenschlüssel oder EC-Wert '{week_str}'. Überspringe.")
+            all_schemes_data[scheme_name] = {
+                "fertilizer_data": processed_f_data,
+                "ec_values": processed_ec_values
+            }
 
-        return processed_f_data, processed_ec_values
+        processed_default_ec_factors: Dict[str, float] = {}
+        if isinstance(default_ec_factors_json, dict):
+            for key, value in default_ec_factors_json.items():
+                try:
+                    processed_default_ec_factors[key] = float(value)
+                except ValueError:
+                    messagebox.showerror("Konfigurationsfehler", f"Ungültiger Wert für default_ec_factor '{key}': {value}. Muss eine Zahl sein.")
+                    return None, None, None
+        else:
+            messagebox.showerror("Konfigurationsfehler", f"Struktur für 'default_ec_factors' ist ungültig in '{CONFIG_FILENAME}'.")
+            return None, None, None
+
+        return all_schemes_data, active_scheme_name, processed_default_ec_factors
 
     except FileNotFoundError:
-        messagebox.showerror("Konfigurationsfehler", f"Konfigurationsdatei '{CONFIG_FILENAME}' nicht gefunden. Bitte stellen Sie sicher, dass die Datei existiert.")
-        return None, None # Signalisiert Fehler
+        messagebox.showerror("Konfigurationsfehler", f"Konfigurationsdatei '{CONFIG_FILENAME}' nicht gefunden.")
+        return None, None, None
     except json.JSONDecodeError as e:
-        messagebox.showerror("Konfigurationsfehler", f"Fehler beim Lesen der JSON-Konfigurationsdatei '{CONFIG_FILENAME}':\n{e}\nBitte überprüfen Sie die Syntax der Datei.")
-        return None, None # Signalisiert Fehler
-    except Exception as e: # Fängt andere unerwartete Fehler ab
+        messagebox.showerror("Konfigurationsfehler", f"Fehler beim Lesen der JSON-Konfigurationsdatei '{CONFIG_FILENAME}':\n{e}")
+        return None, None, None
+    except Exception as e:
         messagebox.showerror("Unerwarteter Fehler", f"Ein unerwarteter Fehler ist beim Laden der Konfiguration aufgetreten:\n{e}")
-        return None, None # Signalisiert Fehler
+        return None, None, None
 
 # Globale Variablen für Konfigurationsdaten
-# Werden durch initialize_config_and_exit_on_error() initialisiert.
-F_DATA: Optional[Dict[str, Dict[int, float]]] = None
-EC_TARGET_VALUES: Optional[Dict[int, float]] = None
+F_DATA: Optional[Dict[str, Dict[str, Any]]] = None # Hält 'schedule' und 'ec_contribution_factor' des aktiven Schemas
+EC_TARGET_VALUES: Optional[Dict[int, float]] = None # Hält 'ec_values' des aktiven Schemas
+ALL_SCHEMES: Optional[Dict[str, Any]] = None
+ACTIVE_SCHEME_NAME: Optional[str] = None
+DEFAULT_EC_FACTORS: Optional[Dict[str, float]] = None
 
 def initialize_config_and_exit_on_error(app_window: tk.Tk) -> bool:
     """
-    Initialisiert die Konfiguration durch Aufruf von `load_fertilizer_config()`.
-    Speichert die geladenen Daten in den globalen Variablen `F_DATA` und `EC_TARGET_VALUES`.
+    Initialisiert die Konfiguration: Lädt alle Schemata, setzt das aktive Schema und Standard-EC-Faktoren.
+    Aktualisiert globale Variablen `ALL_SCHEMES`, `ACTIVE_SCHEME_NAME`, `DEFAULT_EC_FACTORS`,
+    sowie `F_DATA` und `EC_TARGET_VALUES` basierend auf dem aktiven Schema.
 
-    Bei einem Ladefehler (wenn `load_fertilizer_config` (None, None) zurückgibt):
-    - Zeigt eine kritische Fehlermeldung an.
-    - Zerstört das Hauptfenster der Anwendung (`app_window`), um die Ausführung zu beenden.
+    Bei einem Ladefehler oder wenn das aktive Schema nicht in den geladenen Schemata gefunden wird:
+    - Zeigt eine kritische Fehlermeldung.
+    - Zerstört das Hauptfenster der Anwendung (`app_window`).
     - Gibt `False` zurück.
 
-    Bei erfolgreichem Laden:
-    - Prüft zusätzlich, ob die geladenen Daten (`F_DATA`, `EC_TARGET_VALUES`) leer sind und zeigt ggf. eine Warnung.
-    - Gibt `True` zurück.
-
     Args:
-        app_window (tk.Tk): Das Hauptfenster der Tkinter-Anwendung. Wird benötigt, um die
-                            Anwendung im Fehlerfall sauber zu beenden.
+        app_window (tk.Tk): Das Hauptfenster der Tkinter-Anwendung.
     Returns:
-        bool: `True`, wenn die Konfiguration erfolgreich geladen wurde (und Daten nicht kritisch leer sind),
-              `False` bei einem Ladefehler, der zum Beenden der Anwendung führt.
+        bool: `True` bei erfolgreicher Initialisierung, `False` sonst.
     """
-    global F_DATA, EC_TARGET_VALUES
-    F_DATA, EC_TARGET_VALUES = load_fertilizer_config()
+    global ALL_SCHEMES, ACTIVE_SCHEME_NAME, DEFAULT_EC_FACTORS, F_DATA, EC_TARGET_VALUES
 
-    # Kritischer Fehler: Konnte Konfiguration nicht laden.
+    loaded_schemes, active_name, loaded_defaults = load_fertilizer_config()
+
+    if loaded_schemes is None or active_name is None or loaded_defaults is None:
+        # Fehlermeldung wurde bereits in load_fertilizer_config angezeigt
+        if not app_window.winfo_exists(): # Prüfen, ob Fenster noch existiert, falls es schon zerstört wurde
+             sys.exit(1) # Beenden, wenn Fenster nicht mehr da ist
+        messagebox.showerror("Kritischer Fehler", "Konfiguration konnte nicht vollständig geladen werden. Die Anwendung wird beendet.")
+        app_window.destroy()
+        return False
+
+    ALL_SCHEMES = loaded_schemes
+    ACTIVE_SCHEME_NAME = active_name
+    DEFAULT_EC_FACTORS = loaded_defaults
+
+    if ACTIVE_SCHEME_NAME not in ALL_SCHEMES:
+        messagebox.showerror("Kritischer Fehler",
+                             f"Das aktive Schema '{ACTIVE_SCHEME_NAME}' wurde nicht in den geladenen Schemata gefunden. "
+                             f"Die Anwendung wird beendet.")
+        app_window.destroy()
+        return False
+
+    active_scheme_data = ALL_SCHEMES[ACTIVE_SCHEME_NAME]
+    F_DATA = active_scheme_data.get("fertilizer_data")
+    EC_TARGET_VALUES = active_scheme_data.get("ec_values")
+
     if F_DATA is None or EC_TARGET_VALUES is None:
-        # Die spezifische Fehlermeldung (Datei nicht gefunden, JSON-Syntax etc.)
-        # wurde bereits in load_fertilizer_config() via messagebox angezeigt.
-        messagebox.showerror("Kritischer Fehler", "Konfiguration konnte nicht geladen werden. Die Anwendung wird beendet.")
-        app_window.destroy() # Schließt das Hauptfenster und beendet die Tkinter-Loop effektiv.
-        return False # Signalisiert, dass Initialisierung fehlgeschlagen ist.
+        messagebox.showerror("Kritischer Fehler",
+                             f"Daten für das aktive Schema '{ACTIVE_SCHEME_NAME}' sind unvollständig (fertilizer_data oder ec_values fehlt). "
+                             f"Die Anwendung wird beendet.")
+        app_window.destroy()
+        return False
 
-    # Warnung, falls Konfigurationsdaten zwar geladen, aber leer sind.
-    # Dies könnte auf eine leere, aber valide, JSON-Datei hindeuten.
-    if not F_DATA or not EC_TARGET_VALUES:
-        messagebox.showwarning("Konfigurationswarnung",
-                               "Düngemitteldaten oder EC-Zielwerte sind leer. "
-                               "Bitte überprüfen Sie die Konfigurationsdatei (`fertilizer_config.json`). "
-                               "Die Anwendung startet, aber einige Funktionen könnten eingeschränkt sein.")
-        # Optional: Hier könnte man auch beenden, wenn leere Configs als kritisch betrachtet werden.
-        # app_window.destroy()
-        # return False
-    return True # Signalisiert erfolgreiche Initialisierung.
+    if not F_DATA or not EC_TARGET_VALUES: # Prüft auf leere Dictionaries
+         messagebox.showwarning("Konfigurationswarnung",
+                               f"Düngemitteldaten oder EC-Zielwerte für das aktive Schema '{ACTIVE_SCHEME_NAME}' sind leer. "
+                                "Bitte überprüfen Sie die Konfigurationsdatei. "
+                                "Die Anwendung startet, aber einige Funktionen könnten eingeschränkt sein.")
+    return True
 
-
-def berechne_wachstumduenger_menge_fuer_ec(EC_ist: float, EC_soll: float, wassermenge_liter: float) -> float:
+# --- App Status Management ---
+def load_app_status() -> Dict[str, Any]:
     """
-    Berechnet die benötigte Menge Wachstumsdünger (in ml), um einen Ziel-EC-Wert zu erreichen.
+    Lädt den Anwendungsstatus aus APP_STATUS_FILENAME.
+    Gibt Standardwerte zurück, wenn die Datei nicht existiert oder ungültig ist.
+    """
+    defaults = {"last_ec_helper_usage": None}
+    try:
+        with open(APP_STATUS_FILENAME, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return defaults
+    except json.JSONDecodeError:
+        print(f"Warnung: Fehler beim Lesen der Statusdatei '{APP_STATUS_FILENAME}'. Verwende Standardwerte.")
+        return defaults
+
+def save_app_status(status_data: Dict[str, Any]):
+    """
+    Speichert den übergebenen Status in APP_STATUS_FILENAME.
+    """
+    try:
+        with open(APP_STATUS_FILENAME, 'w', encoding='utf-8') as f:
+            json.dump(status_data, f, indent=2)
+    except IOError as e:
+        messagebox.showerror("Fehler beim Speichern des Status", f"Konnte Statusdatei nicht schreiben:\n{e}")
+
+
+def berechne_menge_fuer_ec_anpassung(EC_ist: float, EC_soll: float, wassermenge_liter: float, ec_factor: float) -> float:
+    """
+    Berechnet die benötigte Menge Dünger (in ml), um einen Ziel-EC-Wert zu erreichen,
+    basierend auf dem spezifischen EC-Faktor des Düngers.
 
     Args:
         EC_ist (float): Der aktuelle EC-Wert der Nährlösung in µS/cm.
@@ -344,34 +432,597 @@ def berechne_wachstumduenger_menge_fuer_ec(EC_ist: float, EC_soll: float, wasser
                aktuelle EC-Wert bereits über oder gleich dem Ziel-EC-Wert ist.
     """
     if EC_ist >= EC_soll:
-        return 0.0 # Kein Dünger benötigt, wenn EC bereits erreicht oder überschritten.
-    benötigte_ec_zunahme = EC_soll - EC_ist # Differenz zum Ziel-EC
-    # Berechnung der Düngermenge:
-    # (Gewünschte EC-Änderung / EC-Änderung pro ml Dünger pro Liter Wasser) * Gesamtmenge Wasser in Litern
-    benötigte_menge_ml = (benötigte_ec_zunahme / EC_FACTOR_WACHSTUM) * wassermenge_liter
-    return max(0.0, benötigte_menge_ml) # Sicherstellen, dass kein negativer Wert zurückgegeben wird.
-
-def berechne_bluetenduenger_menge_fuer_ec(EC_ist: float, EC_soll: float, wassermenge_liter: float) -> float:
-    """
-    Berechnet die benötigte Menge Blütedünger (in ml), um einen Ziel-EC-Wert zu erreichen.
-
-    Args:
-        EC_ist (float): Der aktuelle EC-Wert der Nährlösung in µS/cm.
-        EC_soll (float): Der gewünschte Ziel-EC-Wert der Nährlösung in µS/cm.
-        wassermenge_liter (float): Die Gesamtmenge der Nährlösung in Litern.
-
-    Returns:
-        float: Die benötigte Menge Blütedünger in ml. Gibt 0.0 zurück, wenn der
-               aktuelle EC-Wert bereits über oder gleich dem Ziel-EC-Wert ist.
-    """
-    if EC_ist >= EC_soll:
-        return 0.0 # Kein Dünger benötigt, wenn EC bereits erreicht oder überschritten.
+        return 0.0
+    if ec_factor <= 0:
+        print("Warnung: EC-Faktor ist Null oder negativ. Berechnung nicht möglich.")
+        return 0.0 # Oder raise ValueError
     benötigte_ec_zunahme = EC_soll - EC_ist
-    # Menge in ml = (Gewünschte EC-Änderung / EC-Änderung pro ml/L) * Liter
-    benötigte_menge_ml = (benötigte_ec_zunahme / EC_FACTOR_BLUETE) * wassermenge_liter
-    return max(0.0, benötigte_menge_ml) # Sicherstellen, dass nicht negativ
+    benötigte_menge_ml = (benötigte_ec_zunahme / ec_factor) * wassermenge_liter
+    return max(0.0, benötigte_menge_ml)
 
 # --- GUI Callbacks und Hilfsfunktionen ---
+
+def save_config_to_json():
+    """
+    Speichert den aktuellen Zustand von ALL_SCHEMES, ACTIVE_SCHEME_NAME und
+    DEFAULT_EC_FACTORS zurück in die fertilizer_config.json Datei.
+    """
+    if ALL_SCHEMES is None or ACTIVE_SCHEME_NAME is None or DEFAULT_EC_FACTORS is None:
+        messagebox.showerror("Fehler", "Konfigurationsdaten sind nicht vollständig geladen. Kann nicht speichern.")
+        return False
+
+    config_to_save = {
+        "active_scheme_name": ACTIVE_SCHEME_NAME,
+        "schemes": ALL_SCHEMES,
+        "default_ec_factors": DEFAULT_EC_FACTORS
+    }
+    try:
+        with open(CONFIG_FILENAME, 'w', encoding='utf-8') as f:
+            json.dump(config_to_save, f, indent=2) # indent für Lesbarkeit
+        return True
+    except IOError as e:
+        messagebox.showerror("Speicherfehler", f"Fehler beim Schreiben der Konfigurationsdatei '{CONFIG_FILENAME}':\n{e}")
+        return False
+    except Exception as e:
+        messagebox.showerror("Unerwarteter Speicherfehler", f"Ein Fehler ist beim Speichern der Konfiguration aufgetreten:\n{e}")
+        return False
+
+active_scheme_label: Optional[ttk.Label] = None # Globale Variable für das Label
+
+def update_main_ui_for_active_scheme():
+    """
+    Aktualisiert die Haupt-GUI, wenn das aktive Schema wechselt.
+    Dies beinhaltet das Neuladen von F_DATA, EC_TARGET_VALUES,
+    das Neuaufbauen der Dünger-Checkboxes und das Aktualisieren des Active-Scheme-Labels.
+    """
+    global F_DATA, EC_TARGET_VALUES, fertilizer_options, fertilizer_vars, checkboxes, result_labels
+
+    if ALL_SCHEMES is None or ACTIVE_SCHEME_NAME is None or ACTIVE_SCHEME_NAME not in ALL_SCHEMES:
+        messagebox.showerror("Fehler", "Aktives Schema konnte nicht geladen werden.")
+        return
+
+    active_scheme_data = ALL_SCHEMES[ACTIVE_SCHEME_NAME]
+    F_DATA = active_scheme_data.get("fertilizer_data")
+    EC_TARGET_VALUES = active_scheme_data.get("ec_values")
+
+    if F_DATA is None or EC_TARGET_VALUES is None:
+        messagebox.showerror("Fehler", f"Daten für Schema '{ACTIVE_SCHEME_NAME}' sind unvollständig.")
+        # Optional: Setze F_DATA und EC_TARGET_VALUES auf leere Dicts, um weitere Fehler zu vermeiden
+        F_DATA = {}
+        EC_TARGET_VALUES = {}
+        # return # Frühzeitiger Ausstieg oder mit leeren Daten weitermachen?
+
+    # Dünger-Checkboxes neu erstellen/aktualisieren
+    # Zuerst alte Widgets entfernen, falls vorhanden
+    for cb in checkboxes:
+        cb.destroy()
+    for lbl in result_labels:
+        lbl.destroy()
+
+    fertilizer_options = list(F_DATA.keys()) if F_DATA else []
+    fertilizer_vars = []
+    checkboxes = []
+    result_labels = []
+
+    for i, option_text in enumerate(fertilizer_options):
+        var = tk.IntVar()
+        fertilizer_vars.append(var)
+        cmd = lambda opt=option_text, v=var: calculate(opt, v)
+        checkbox = ttk.Checkbutton(fertilizer_frame, text=option_text, variable=var, command=cmd)
+        checkbox.grid(row=i, column=0, padx=5, pady=2, sticky="w")
+        checkboxes.append(checkbox)
+        result_label = ttk.Label(fertilizer_frame, text="", width=10, anchor="e")
+        result_label.grid(row=i, column=1, padx=5, pady=2, sticky="e")
+        result_labels.append(result_label)
+
+    if active_scheme_label:
+        active_scheme_label.config(text=f"Aktives Schema: {ACTIVE_SCHEME_NAME}")
+
+    update_week() # Aktualisiert Berechnungen und EC-Werte basierend auf dem neuen Schema
+
+
+def open_scheme_manager_window():
+    """
+    Öffnet das Fenster zur Verwaltung von Düngeschemata.
+    """
+    scheme_window = tk.Toplevel(window)
+    scheme_window.title("Düngeschemata Verwalten")
+    scheme_window.transient(window)
+    scheme_window.grab_set()
+    scheme_window.resizable(True, True)
+    scheme_window.minsize(700, 450)
+
+    # --- Helper: Parse Fertilizer Display Name ---
+    def parse_fertilizer_display_name(display_name: str) -> str:
+        if "(EC:" in display_name and display_name.endswith(")"):
+            return display_name.split(" (EC:")[0].strip()
+        print(f"Warnung: Konnte Düngernamen nicht aus '{display_name}' extrahieren.")
+        return display_name # Fallback, though should not happen with consistent listbox population
+
+    paned_window = ttk.PanedWindow(scheme_window, orient=tk.HORIZONTAL)
+    paned_window.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    schemes_frame_container = ttk.Frame(paned_window, width=250)
+    paned_window.add(schemes_frame_container, weight=1)
+    ttk.Label(schemes_frame_container, text="Verfügbare Schemata:").pack(anchor="w", padx=5, pady=(0,5))
+    scheme_listbox_frame = ttk.Frame(schemes_frame_container)
+    scheme_listbox_frame.pack(fill=tk.BOTH, expand=True)
+    scheme_listbox = tk.Listbox(scheme_listbox_frame, exportselection=False)
+    scheme_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    scheme_scrollbar = ttk.Scrollbar(scheme_listbox_frame, orient=tk.VERTICAL, command=scheme_listbox.yview)
+    scheme_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    scheme_listbox.config(yscrollcommand=scheme_scrollbar.set)
+
+    fertilizers_frame_container = ttk.Frame(paned_window)
+    paned_window.add(fertilizers_frame_container, weight=2)
+    ttk.Label(fertilizers_frame_container, text="Dünger im ausgewählten Schema:").pack(anchor="w", padx=5, pady=(0,5))
+    fertilizer_listbox_frame = ttk.Frame(fertilizers_frame_container)
+    fertilizer_listbox_frame.pack(fill=tk.BOTH, expand=True)
+    fertilizer_listbox = tk.Listbox(fertilizer_listbox_frame, exportselection=False)
+    fertilizer_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    fertilizer_scrollbar = ttk.Scrollbar(fertilizer_listbox_frame, orient=tk.VERTICAL, command=fertilizer_listbox.yview)
+    fertilizer_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    fertilizer_listbox.config(yscrollcommand=fertilizer_scrollbar.set)
+
+    # --- Populating and Refreshing Lists ---
+    def refresh_fertilizer_list_for_selected_scheme():
+        selected_indices = scheme_listbox.curselection()
+        if selected_indices:
+            s_name = scheme_listbox.get(selected_indices[0])
+            populate_fertilizer_listbox(s_name)
+        else:
+            populate_fertilizer_listbox(None) # Clear if no scheme selected
+
+    scheme_window.refresh_fertilizer_list_for_selected_scheme = refresh_fertilizer_list_for_selected_scheme
+
+    def populate_fertilizer_listbox(selected_scheme_name: Optional[str] = None):
+        fertilizer_listbox.delete(0, tk.END)
+        if selected_scheme_name and ALL_SCHEMES and selected_scheme_name in ALL_SCHEMES:
+            scheme_fertilizer_data = ALL_SCHEMES[selected_scheme_name].get("fertilizer_data", {})
+            for f_name, f_details in sorted(scheme_fertilizer_data.items()): # Sort for consistent order
+                ec_factor = f_details.get("ec_contribution_factor", "N/A")
+                fertilizer_listbox.insert(tk.END, f"{f_name} (EC: {ec_factor})")
+
+    def on_scheme_select(event=None): # event can be None if called manually
+        refresh_fertilizer_list_for_selected_scheme()
+
+    scheme_listbox.bind("<<ListboxSelect>>", on_scheme_select)
+
+    def populate_scheme_listbox():
+        # ... (keep existing populate_scheme_listbox logic, ensure it calls on_scheme_select at the end if needed)
+        current_selection_index = scheme_listbox.curselection()
+        scheme_listbox.delete(0, tk.END)
+        if ALL_SCHEMES:
+            for i, scheme_name_key in enumerate(sorted(ALL_SCHEMES.keys())): # Sort for consistent order
+                scheme_listbox.insert(tk.END, scheme_name_key)
+                if scheme_name_key == ACTIVE_SCHEME_NAME:
+                    scheme_listbox.itemconfig(tk.END, {'bg':'lightblue'})
+
+        restored_selection = False
+        if current_selection_index:
+            try:
+                # Try to restore based on index, but if list changed, this might be wrong
+                # A better way would be to store and restore by name if possible
+                scheme_listbox.selection_set(current_selection_index[0])
+                scheme_listbox.activate(current_selection_index[0])
+                scheme_listbox.see(current_selection_index[0])
+                restored_selection = True
+            except tk.TclError:
+                 pass # Index out of bounds
+
+        if not restored_selection and ACTIVE_SCHEME_NAME and ALL_SCHEMES:
+             try:
+                idx = list(sorted(ALL_SCHEMES.keys())).index(ACTIVE_SCHEME_NAME)
+                scheme_listbox.selection_set(idx)
+                scheme_listbox.activate(idx)
+                scheme_listbox.see(idx)
+             except (ValueError, tk.TclError):
+                 pass
+
+        on_scheme_select() # Populate fertilizer list for current selection
+
+    populate_scheme_listbox()
+
+    # --- Scheme Action Buttons ---
+    scheme_button_frame = ttk.Frame(schemes_frame_container)
+    scheme_button_frame.pack(fill=tk.X, pady=(5,0))
+    # ... (keep existing set_active_scheme, create_new_scheme, delete_selected_scheme, rename_selected_scheme functions) ...
+    def set_active_scheme():
+        global ACTIVE_SCHEME_NAME
+        selected_indices = scheme_listbox.curselection()
+        if not selected_indices:
+            messagebox.showwarning("Keine Auswahl", "Bitte wählen Sie ein Schema aus der Liste aus.", parent=scheme_window)
+            return
+        selected_scheme_name = scheme_listbox.get(selected_indices[0])
+        if selected_scheme_name == ACTIVE_SCHEME_NAME:
+            messagebox.showinfo("Information", f"Schema '{selected_scheme_name}' ist bereits aktiv.", parent=scheme_window)
+            return
+        ACTIVE_SCHEME_NAME = selected_scheme_name
+        if save_config_to_json():
+            update_main_ui_for_active_scheme()
+            populate_scheme_listbox()
+            messagebox.showinfo("Erfolg", f"Schema '{selected_scheme_name}' wurde als aktiv gesetzt.", parent=scheme_window)
+
+    set_active_button = ttk.Button(scheme_button_frame, text="Als Aktiv", command=set_active_scheme)
+    set_active_button.pack(side=tk.LEFT, padx=2)
+
+    def create_new_scheme():
+        global ALL_SCHEMES
+        if ALL_SCHEMES is None: return
+        new_scheme_name = simpledialog.askstring("Neues Schema", "Name für das neue Schema:", parent=scheme_window)
+        if not new_scheme_name: return
+        if new_scheme_name in ALL_SCHEMES:
+            messagebox.showerror("Fehler", f"Schema '{new_scheme_name}' existiert bereits.", parent=scheme_window)
+            return
+        source_scheme_name = None
+        selected_indices = scheme_listbox.curselection()
+        if selected_indices: source_scheme_name = scheme_listbox.get(selected_indices[0])
+        elif "Default Scheme" in ALL_SCHEMES: source_scheme_name = "Default Scheme"
+        if source_scheme_name and source_scheme_name in ALL_SCHEMES:
+            ALL_SCHEMES[new_scheme_name] = copy.deepcopy(ALL_SCHEMES[source_scheme_name])
+        else:
+            ALL_SCHEMES[new_scheme_name] = {"fertilizer_data": {}, "ec_values": {}}
+        if save_config_to_json():
+            populate_scheme_listbox()
+            messagebox.showinfo("Erfolg", f"Schema '{new_scheme_name}' erstellt.", parent=scheme_window)
+        else: del ALL_SCHEMES[new_scheme_name]
+
+    create_scheme_button = ttk.Button(scheme_button_frame, text="Neu", command=create_new_scheme)
+    create_scheme_button.pack(side=tk.LEFT, padx=2)
+
+    def delete_selected_scheme():
+        global ALL_SCHEMES, ACTIVE_SCHEME_NAME
+        if ALL_SCHEMES is None: return
+        selected_indices = scheme_listbox.curselection()
+        if not selected_indices: return
+        scheme_to_delete = scheme_listbox.get(selected_indices[0])
+        if len(ALL_SCHEMES) <= 1:
+            messagebox.showerror("Fehler", "Letztes Schema kann nicht gelöscht werden.", parent=scheme_window)
+            return
+        if not messagebox.askyesno("Bestätigen", f"Schema '{scheme_to_delete}' wirklich löschen?", parent=scheme_window):
+            return
+
+        original_scheme_data_backup = copy.deepcopy(ALL_SCHEMES[scheme_to_delete]) # Backup for potential rollback
+        original_active_scheme_name_backup = ACTIVE_SCHEME_NAME
+
+        del ALL_SCHEMES[scheme_to_delete]
+        active_scheme_changed = False
+        if scheme_to_delete == ACTIVE_SCHEME_NAME:
+            ACTIVE_SCHEME_NAME = list(ALL_SCHEMES.keys())[0]
+            active_scheme_changed = True
+        if save_config_to_json():
+            populate_scheme_listbox()
+            if active_scheme_changed: update_main_ui_for_active_scheme()
+            messagebox.showinfo("Erfolg", f"Schema '{scheme_to_delete}' gelöscht.", parent=scheme_window)
+        else: # Rollback if save failed
+            ALL_SCHEMES[scheme_to_delete] = original_scheme_data_backup
+            ACTIVE_SCHEME_NAME = original_active_scheme_name_backup
+            messagebox.showerror("Fehler", "Löschen fehlgeschlagen, Speichern nicht möglich.", parent=scheme_window)
+            populate_scheme_listbox() # Refresh to show rolled-back state
+
+
+    delete_scheme_button = ttk.Button(scheme_button_frame, text="Löschen", command=delete_selected_scheme)
+    delete_scheme_button.pack(side=tk.LEFT, padx=2)
+
+    def rename_selected_scheme():
+        global ALL_SCHEMES, ACTIVE_SCHEME_NAME
+        if ALL_SCHEMES is None: return
+        selected_indices = scheme_listbox.curselection()
+        if not selected_indices: return
+        old_name = scheme_listbox.get(selected_indices[0])
+        new_name = simpledialog.askstring("Schema Umbenennen", f"Neuer Name für '{old_name}':", initialvalue=old_name, parent=scheme_window)
+        if not new_name or new_name == old_name: return
+        if new_name in ALL_SCHEMES:
+            messagebox.showerror("Fehler", f"Schema '{new_name}' existiert bereits.", parent=scheme_window)
+            return
+
+        ALL_SCHEMES[new_name] = ALL_SCHEMES.pop(old_name)
+        active_renamed = False
+        if old_name == ACTIVE_SCHEME_NAME:
+            ACTIVE_SCHEME_NAME = new_name
+            active_renamed = True
+        if save_config_to_json():
+            populate_scheme_listbox()
+            if active_renamed: update_main_ui_for_active_scheme()
+            messagebox.showinfo("Erfolg", f"Schema '{old_name}' zu '{new_name}' umbenannt.", parent=scheme_window)
+        else: # Rollback
+            ALL_SCHEMES[old_name] = ALL_SCHEMES.pop(new_name)
+            if active_renamed: ACTIVE_SCHEME_NAME = old_name
+            messagebox.showerror("Fehler", "Umbenennen fehlgeschlagen, Speichern nicht möglich.", parent=scheme_window)
+            populate_scheme_listbox()
+
+    rename_scheme_button = ttk.Button(scheme_button_frame, text="Umbenennen", command=rename_selected_scheme)
+    rename_scheme_button.pack(side=tk.LEFT, padx=2)
+
+    # --- Fertilizer Action Buttons ---
+    fertilizer_button_frame = ttk.Frame(fertilizers_frame_container)
+    fertilizer_button_frame.pack(fill=tk.X, pady=(5,0))
+
+    def call_add_fertilizer_dialog():
+        selected_scheme_indices = scheme_listbox.curselection()
+        if not selected_scheme_indices:
+            messagebox.showwarning("Keine Schema-Auswahl", "Bitte zuerst ein Schema auswählen.", parent=scheme_window)
+            return
+        current_scheme_name = scheme_listbox.get(selected_scheme_indices[0])
+        open_fertilizer_dialog(scheme_window, current_scheme_name, existing_fertilizer_name=None)
+
+    def call_edit_fertilizer_dialog():
+        selected_scheme_indices = scheme_listbox.curselection()
+        if not selected_scheme_indices:
+            messagebox.showwarning("Keine Schema-Auswahl", "Bitte zuerst ein Schema auswählen.", parent=scheme_window)
+            return
+        current_scheme_name = scheme_listbox.get(selected_scheme_indices[0])
+
+        selected_fertilizer_indices = fertilizer_listbox.curselection()
+        if not selected_fertilizer_indices:
+            messagebox.showwarning("Keine Dünger-Auswahl", "Bitte einen Dünger zum Bearbeiten auswählen.", parent=scheme_window)
+            return
+
+        display_name = fertilizer_listbox.get(selected_fertilizer_indices[0])
+        actual_fertilizer_name = parse_fertilizer_display_name(display_name)
+
+        if not actual_fertilizer_name or not ALL_SCHEMES or current_scheme_name not in ALL_SCHEMES or \
+           actual_fertilizer_name not in ALL_SCHEMES[current_scheme_name]["fertilizer_data"]:
+            messagebox.showerror("Fehler", f"Dünger '{actual_fertilizer_name}' nicht in Schema '{current_scheme_name}' gefunden.", parent=scheme_window)
+            refresh_fertilizer_list_for_selected_scheme()
+            return
+        open_fertilizer_dialog(scheme_window, current_scheme_name, existing_fertilizer_name=actual_fertilizer_name)
+
+    def delete_selected_fertilizer():
+        selected_scheme_indices = scheme_listbox.curselection()
+        if not selected_scheme_indices:
+            messagebox.showwarning("Keine Schema-Auswahl", "Bitte zuerst ein Schema auswählen.", parent=scheme_window)
+            return
+        current_scheme_name = scheme_listbox.get(selected_scheme_indices[0])
+
+        selected_fertilizer_indices = fertilizer_listbox.curselection()
+        if not selected_fertilizer_indices:
+            messagebox.showwarning("Keine Dünger-Auswahl", "Bitte einen Dünger zum Löschen auswählen.", parent=scheme_window)
+            return
+
+        display_name = fertilizer_listbox.get(selected_fertilizer_indices[0])
+        actual_fertilizer_name = parse_fertilizer_display_name(display_name)
+
+        if not messagebox.askyesno("Bestätigen", f"Dünger '{actual_fertilizer_name}' aus Schema '{current_scheme_name}' wirklich löschen?", parent=scheme_window):
+            return
+
+        if ALL_SCHEMES and current_scheme_name in ALL_SCHEMES and \
+           "fertilizer_data" in ALL_SCHEMES[current_scheme_name] and \
+           actual_fertilizer_name in ALL_SCHEMES[current_scheme_name]["fertilizer_data"]:
+
+            # Backup for potential rollback if save fails
+            original_fertilizer_scheme_data_backup = copy.deepcopy(ALL_SCHEMES[current_scheme_name]["fertilizer_data"])
+
+            del ALL_SCHEMES[current_scheme_name]["fertilizer_data"][actual_fertilizer_name]
+
+            if save_config_to_json():
+                messagebox.showinfo("Erfolg", f"Dünger '{actual_fertilizer_name}' gelöscht.", parent=scheme_window)
+                refresh_fertilizer_list_for_selected_scheme()
+                if ACTIVE_SCHEME_NAME == current_scheme_name:
+                    update_main_ui_for_active_scheme()
+            else:
+                ALL_SCHEMES[current_scheme_name]["fertilizer_data"] = original_fertilizer_scheme_data_backup # Rollback
+                messagebox.showerror("Speicherfehler", "Löschen fehlgeschlagen, Speichern nicht möglich. Änderungen zurückgerollt.", parent=scheme_window)
+                refresh_fertilizer_list_for_selected_scheme()
+        else:
+            messagebox.showerror("Fehler", f"Konnte Dünger '{actual_fertilizer_name}' nicht finden.", parent=scheme_window)
+            refresh_fertilizer_list_for_selected_scheme()
+
+    add_fert_button = ttk.Button(fertilizer_button_frame, text="Hinzufügen", command=call_add_fertilizer_dialog)
+    add_fert_button.pack(side=tk.LEFT, padx=2)
+    edit_fert_button = ttk.Button(fertilizer_button_frame, text="Bearbeiten", command=call_edit_fertilizer_dialog)
+    edit_fert_button.pack(side=tk.LEFT, padx=2)
+    delete_fert_button = ttk.Button(fertilizer_button_frame, text="Löschen", command=delete_selected_fertilizer)
+    delete_fert_button.pack(side=tk.LEFT, padx=2)
+
+    # Overall Close Button
+    overall_close_button_frame = ttk.Frame(scheme_window)
+    overall_close_button_frame.pack(fill=tk.X, pady=10, padx=10, side=tk.BOTTOM)
+    close_button = ttk.Button(overall_close_button_frame, text="Schließen", command=scheme_window.destroy)
+    close_button.pack(side=tk.RIGHT)
+
+    on_scheme_select() # Populate fertilizer list for current selection
+
+    scheme_window.wait_window()
+
+# --- Helper functions for parsing/formatting fertilizer schedule strings ---
+def parse_schedule_string(schedule_str: str) -> Optional[Dict[int, float]]:
+    """
+    Parses a schedule string like "1:0.5, 2:1.0, 10:1.2" into {1: 0.5, 2: 1.0, 10: 1.2}.
+    Returns None if parsing fails due to format errors.
+    """
+    schedule_dict: Dict[int, float] = {}
+    if not schedule_str.strip(): # Handle empty string as valid (empty schedule)
+        return schedule_dict
+
+    parts = schedule_str.split(',')
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue # Skip empty parts if there are trailing commas etc.
+        try:
+            week_str, dosage_str = part.split(':')
+            week = int(week_str.strip())
+            dosage = float(dosage_str.strip())
+            if week <= 0: # Weeks should be positive
+                raise ValueError("Wochennummer muss positiv sein.")
+            schedule_dict[week] = dosage
+        except ValueError as e:
+            messagebox.showerror("Formatfehler im Schema", f"Ungültiger Eintrag im Schema: '{part}'.\nFehler: {e}\nErwartetes Format: 'Woche:Dosierung', z.B. '1:0.5, 2:1.0'.")
+            return None
+    return schedule_dict
+
+def format_schedule_dict(schedule_dict: Dict[int, float]) -> str:
+    """
+    Formats a schedule dictionary like {1: 0.5, 2: 1.0} into "1:0.5, 2:1.0".
+    """
+    if not schedule_dict:
+        return ""
+    # Sort by week number for consistent output
+    return ", ".join(f"{week}:{dosage}" for week, dosage in sorted(schedule_dict.items()))
+
+# --- Fertilizer Add/Edit Dialog ---
+def open_fertilizer_dialog(parent_window: tk.Toplevel, current_scheme_name: str, existing_fertilizer_name: Optional[str] = None):
+    """
+    Opens a dialog to add or edit a fertilizer for the given scheme.
+    If existing_fertilizer_name is provided, it's an edit operation.
+    """
+    is_edit_mode = existing_fertilizer_name is not None
+    title = "Dünger Bearbeiten" if is_edit_mode else "Neuen Dünger Hinzufügen"
+
+    dialog = tk.Toplevel(parent_window)
+    dialog.title(title)
+    dialog.transient(parent_window)
+    dialog.grab_set()
+    dialog.resizable(False, False)
+    dialog.minsize(400, 300)
+
+    fertilizer_data_to_edit = {}
+    original_name_for_edit = existing_fertilizer_name
+
+    if is_edit_mode and ALL_SCHEMES and current_scheme_name in ALL_SCHEMES and \
+       existing_fertilizer_name and existing_fertilizer_name in ALL_SCHEMES[current_scheme_name]["fertilizer_data"]:
+        fertilizer_data_to_edit = ALL_SCHEMES[current_scheme_name]["fertilizer_data"][existing_fertilizer_name]
+
+    # --- Widgets ---
+    main_frame = ttk.Frame(dialog, padding="10")
+    main_frame.pack(fill=tk.BOTH, expand=True)
+
+    ttk.Label(main_frame, text="Düngername:").grid(row=0, column=0, sticky="w", pady=2)
+    name_var = tk.StringVar(value=existing_fertilizer_name if is_edit_mode else "")
+    name_entry = ttk.Entry(main_frame, textvariable=name_var, width=40)
+    name_entry.grid(row=0, column=1, sticky="ew", pady=2)
+
+    ttk.Label(main_frame, text="EC Beitrag (µS/cm pro ml/L):").grid(row=1, column=0, sticky="w", pady=2)
+    ec_var = tk.StringVar(value=str(fertilizer_data_to_edit.get("ec_contribution_factor", "0.0")))
+    ec_entry = ttk.Entry(main_frame, textvariable=ec_var, width=10)
+    ec_entry.grid(row=1, column=1, sticky="w", pady=2)
+
+    ttk.Label(main_frame, text="Düngeschema (Woche:Dosierung, ...):").grid(row=2, column=0, sticky="nw", pady=2)
+    schedule_text = scrolledtext.ScrolledText(main_frame, height=10, width=50, wrap=tk.WORD)
+    schedule_text.grid(row=2, column=1, sticky="ew", pady=2)
+    schedule_text.insert("1.0", format_schedule_dict(fertilizer_data_to_edit.get("schedule", {})))
+
+    main_frame.columnconfigure(1, weight=1) # Allow text widget to expand
+
+    # --- Save/Cancel Buttons ---
+    button_dialog_frame = ttk.Frame(main_frame)
+    button_dialog_frame.grid(row=3, column=0, columnspan=2, pady=(10,0), sticky="e")
+
+    def on_save():
+        new_name = name_var.get().strip()
+        ec_factor_str = ec_var.get().strip()
+        schedule_str = schedule_text.get("1.0", tk.END).strip()
+
+        if not new_name:
+            messagebox.showerror("Fehler", "Düngername darf nicht leer sein.", parent=dialog)
+            return
+
+        try:
+            ec_factor = float(ec_factor_str)
+        except ValueError:
+            messagebox.showerror("Fehler", "EC Beitrag muss eine gültige Zahl sein.", parent=dialog)
+            return
+
+        parsed_schedule = parse_schedule_string(schedule_str)
+        if parsed_schedule is None: # Error already shown by parse_schedule_string
+            return
+
+        # Check for duplicate name (only if name changed or in add mode)
+        if new_name != original_name_for_edit and new_name in ALL_SCHEMES[current_scheme_name]["fertilizer_data"]:
+            messagebox.showerror("Fehler", f"Ein Dünger mit dem Namen '{new_name}' existiert bereits in diesem Schema.", parent=dialog)
+            return
+
+        updated_fertilizer_data = {
+            "schedule": parsed_schedule,
+            "ec_contribution_factor": ec_factor
+        }
+
+        # Update ALL_SCHEMES
+        if is_edit_mode and original_name_for_edit and original_name_for_edit != new_name:
+            # Name changed, remove old entry
+            del ALL_SCHEMES[current_scheme_name]["fertilizer_data"][original_name_for_edit]
+
+        ALL_SCHEMES[current_scheme_name]["fertilizer_data"][new_name] = updated_fertilizer_data
+
+        if save_config_to_json():
+            messagebox.showinfo("Erfolg", f"Dünger '{new_name}' gespeichert.", parent=dialog)
+            # Refresh fertilizer list in the scheme manager window (passed as parent_window)
+            # This requires access to scheme_listbox and fertilizer_listbox from parent.
+            # A bit of a hack, ideally use a callback or make populate_fertilizer_listbox more accessible.
+            # For now, let's assume parent_window is the scheme_manager_window.
+
+            # Find the fertilizer_listbox in the parent (scheme_manager) window
+            # This is not ideal, direct reference or callback would be better.
+            # Assuming scheme_listbox is accessible via parent_window.scheme_listbox_ref or similar if set.
+            # For now, we re-populate based on current selection in scheme_listbox.
+
+            # Find the scheme_listbox (which is a child of parent_window's child frames)
+            # This is getting complex. Let's assume a refresh function on parent_window if possible,
+            # or pass the listbox reference.
+            # For now, just call populate_fertilizer_listbox directly assuming it's in scope.
+            # This will only work if open_fertilizer_dialog is defined *inside* open_scheme_manager_window
+            # or if scheme_listbox & fertilizer_listbox are made more globally accessible (not great).
+
+            # Correct way: call a refresh method on the parent window or pass references.
+            # Let's try to find the listbox:
+            schemes_lb = None
+            fertilizer_lb = None
+            # This is a simplified search, real UI might be more nested.
+            for child_widget in parent_window.winfo_children():
+                 if isinstance(child_widget, ttk.PanedWindow): # The PanedWindow
+                     for pane_child in child_widget.winfo_children(): # schemes_frame, fertilizers_frame
+                         for sub_child in pane_child.winfo_children(): # e.g. fertilizer_listbox_frame
+                             if isinstance(sub_child, ttk.Frame):
+                                 for f_lb_candidate in sub_child.winfo_children():
+                                     if isinstance(f_lb_candidate, tk.Listbox) and f_lb_candidate.master is sub_child:
+                                         # This is heuristic, need a better way
+                                         # Assuming the *second* listbox found this way is fertilizer_listbox
+                                         if schemes_lb is None: # First one is likely schemes_lb
+                                             schemes_lb = f_lb_candidate
+                                         else:
+                                             fertilizer_lb = f_lb_candidate
+                                             break
+                                 if fertilizer_lb: break
+                         if fertilizer_lb: break
+                     if fertilizer_lb: break
+
+            if fertilizer_lb and schemes_lb:
+                 selected_scheme_indices = schemes_lb.curselection()
+                 if selected_scheme_indices:
+                     s_name = schemes_lb.get(selected_scheme_indices[0])
+                     # Manually call populate_fertilizer_listbox with the correct name and listbox
+                     # This is still not ideal as populate_fertilizer_listbox is not designed for this
+                     # We need a dedicated refresh function for the fertilizer list in scheme manager.
+                     # For now, let's assume the parent can refresh itself.
+                     # The original `populate_fertilizer_listbox` is defined within `open_scheme_manager_window`
+                     # and is not directly callable here.
+                     # This will require refactoring `populate_fertilizer_listbox`
+                     # or adding a specific refresh method to scheme_manager.
+
+                     # Let's try to find the scheme_listbox from parent_window and call its on_select manually
+                     # This is also not ideal, but might work for now
+                     # Assume scheme_listbox is named 'scheme_listbox_ref' on parent_window
+                     if hasattr(parent_window, 'refresh_fertilizer_list_for_selected_scheme'):
+                         parent_window.refresh_fertilizer_list_for_selected_scheme()
+
+
+            if ACTIVE_SCHEME_NAME == current_scheme_name:
+                update_main_ui_for_active_scheme()
+            dialog.destroy()
+        else:
+            # Save failed, error message already shown by save_config_to_json
+            # Potentially roll back changes in ALL_SCHEMES if needed (complex)
+            pass
+
+    save_button = ttk.Button(button_dialog_frame, text="Speichern", command=on_save)
+    save_button.pack(side=tk.LEFT, padx=5)
+    cancel_button = ttk.Button(button_dialog_frame, text="Abbrechen", command=dialog.destroy)
+    cancel_button.pack(side=tk.LEFT, padx=5)
+
+    name_entry.focus_set()
+    dialog.wait_window()
+
 
 def update_week(event=None):
     """
@@ -803,18 +1454,33 @@ def ec_berechnen():
                  ergebnis_label.config(text="Aktueller EC ist bereits über oder gleich dem Soll-EC.\nKein Dünger benötigt.", foreground="blue")
                  return
 
-            # Berechnung für beide Düngerarten (Wachstum und Blüte).
-            menge_wachstum = berechne_wachstumduenger_menge_fuer_ec(ec_ist, ec_soll, wassermenge)
-            menge_bluete = berechne_bluetenduenger_menge_fuer_ec(ec_ist, ec_soll, wassermenge)
+            selected_fertilizer_name = fertilizer_ec_combo.get()
+            if not selected_fertilizer_name:
+                raise ValueError("Bitte einen Dünger auswählen.")
 
-            # Ergebnis im Dialog anzeigen.
-            ergebnis_text = (
-                f"Um {ec_soll:.0f} µS/cm zu erreichen, fügen Sie hinzu:\n\n"
-                f"-> ENTWEDER {menge_wachstum:.2f} ml Wachstumsdünger\n"
-                f"-> ODER {menge_bluete:.2f} ml Blütedünger\n\n"
-                f"(Berechnet für {wassermenge:.2f} L Wasser)"
+            if F_DATA is None or selected_fertilizer_name not in F_DATA or \
+               "ec_contribution_factor" not in F_DATA[selected_fertilizer_name]:
+                raise ValueError(f"EC Faktor für '{selected_fertilizer_name}' nicht gefunden.")
+
+            ec_factor = F_DATA[selected_fertilizer_name]["ec_contribution_factor"]
+            if not isinstance(ec_factor, (int, float)) or ec_factor <= 0:
+                raise ValueError(f"Ungültiger EC Faktor ({ec_factor}) für '{selected_fertilizer_name}'.")
+
+            benoetigte_menge = berechne_menge_fuer_ec_anpassung(ec_ist, ec_soll, wassermenge, ec_factor)
+
+            final_ergebnis_text = (
+                f"Um {ec_soll:.0f} µS/cm mit '{selected_fertilizer_name}' zu erreichen:\n\n"
+                f"-> Benötigte Menge: {benoetigte_menge:.2f} ml\n"
+                f"(EC-Faktor: {ec_factor:.0f}, berechnet für {wassermenge:.2f} L Wasser)"
             )
-            ergebnis_label.config(text=ergebnis_text, foreground="black")
+            ergebnis_label.config(text=final_ergebnis_text, foreground="black")
+
+            # Timestamp speichern und Label aktualisieren
+            current_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            status_to_save = {"last_ec_helper_usage": current_timestamp}
+            save_app_status(status_to_save)
+            if last_used_label: # Check if label exists
+                last_used_label.config(text=f"EC Helper last used: {current_timestamp}")
 
         except ValueError as ve: # Fängt spezifische Fehler bei der Eingabevalidierung.
             ergebnis_label.config(text=f"Eingabefehler: {ve}", foreground="red")
@@ -853,18 +1519,32 @@ def ec_berechnen():
     ec_soll_dropdown = ttk.OptionMenu(ec_soll_frame, ec_soll_var, "vorhanden", "vorhanden", "manuell")
     ec_soll_dropdown.grid(row=0, column=0, padx=(0, 5))
 
-    ec_soll_entry = ttk.Entry(ec_soll_frame, width=15, state="disabled") # Manuelles Eingabefeld, initial deaktiviert.
+    ec_soll_entry = ttk.Entry(ec_soll_frame, width=15, state="disabled")
     ec_soll_entry.grid(row=0, column=1, sticky="ew")
 
+    ttk.Label(ec_window, text="Dünger auswählen:").grid(row=3, column=0, padx=10, pady=5, sticky="w")
+    fertilizer_ec_combo_var = tk.StringVar()
+    fertilizer_ec_combo = ttk.Combobox(ec_window, textvariable=fertilizer_ec_combo_var, state="readonly", width=30)
+
+    fertilizer_names = list(F_DATA.keys()) if F_DATA else []
+    fertilizer_ec_combo['values'] = fertilizer_names
+    if fertilizer_names:
+        fertilizer_ec_combo.set(fertilizer_names[0])
+    fertilizer_ec_combo.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
+
+
     # Button zum Starten der Berechnung.
-    berechnen_button = ttk.Button(ec_window, text="Düngermengen berechnen", command=duenger_berechnen)
-    berechnen_button.grid(row=3, column=0, columnspan=2, pady=10)
+    berechnen_button = ttk.Button(ec_window, text="Düngermenge berechnen", command=duenger_berechnen)
+    berechnen_button.grid(row=4, column=0, columnspan=2, pady=10)
+    if not fertilizer_names: # Disable button if no fertilizers
+        berechnen_button.config(state="disabled")
+
 
     # Label zur Anzeige der Ergebnisse oder Fehlermeldungen.
     ergebnis_label = ttk.Label(ec_window, text="Ergebnis der Berechnung wird hier angezeigt. Bitte alle Werte eingeben.", wraplength=350, justify=tk.LEFT)
-    ergebnis_label.grid(row=4, column=0, columnspan=2, padx=10, pady=10, sticky="w")
+    ergebnis_label.grid(row=5, column=0, columnspan=2, padx=10, pady=10, sticky="w")
 
-    ec_ist_entry.focus_set() # Initialer Fokus auf das erste Eingabefeld.
+    ec_ist_entry.focus_set()
     toggle_ec_soll_entry() # Initialen Status des manuellen EC-Soll-Feldes setzen.
     ec_window.wait_window() # Warten, bis das Dialogfenster geschlossen wird.
 
@@ -888,35 +1568,40 @@ window.columnconfigure(1, weight=1)
 
 # Frame für Pflanzenauswahl und Basisinformationen (Genetik, Woche, Keimdatum).
 plant_info_frame = ttk.LabelFrame(window, text="Pflanzeninformationen")
-plant_info_frame.grid(row=0, column=0, columnspan=3, padx=10, pady=10, sticky="ew") # ew = east-west (horizontal ausdehnen)
-plant_info_frame.columnconfigure(1, weight=1) # Spalte für Dropdown und Genetik dehnt sich aus.
+plant_info_frame.grid(row=0, column=0, columnspan=3, padx=10, pady=10, sticky="ew")
+plant_info_frame.columnconfigure(1, weight=1)
 
 # Pflanzenauswahl (Dropdown-Menü).
-ttk.Label(plant_info_frame, text="Pflanze:").grid(row=0, column=0, padx=5, pady=5, sticky="w") # w = west (linksbündig)
-plant_var = tk.StringVar() # Variable zur Speicherung der Auswahl.
-plant_dropdown = ttk.Combobox(plant_info_frame, textvariable=plant_var, state="readonly") # Schreibgeschützt.
+ttk.Label(plant_info_frame, text="Pflanze:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+plant_var = tk.StringVar()
+plant_dropdown = ttk.Combobox(plant_info_frame, textvariable=plant_var, state="readonly")
 plant_dropdown.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-plant_dropdown.bind("<<ComboboxSelected>>", update_week) # Event bei Auswahl einer Pflanze.
+plant_dropdown.bind("<<ComboboxSelected>>", update_week)
 
 # Anzeige des EC-Zielwerts (Plan-EC).
 ec_label = ttk.Label(plant_info_frame, text="Plan-EC (Erde): -", font=('TkDefaultFont', 9, 'bold'))
-ec_label.grid(row=0, column=2, padx=10, pady=5, sticky="e") # e = east (rechtsbündig)
+ec_label.grid(row=0, column=2, padx=5, pady=5, sticky="e")
 
 # Anzeige der Genetik.
 ttk.Label(plant_info_frame, text="Genetik:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
-genetics_entry = ttk.Entry(plant_info_frame, state="readonly") # Schreibgeschützt.
-genetics_entry.grid(row=1, column=1, columnspan=2, padx=5, pady=5, sticky="ew") # Nimmt Platz über 2 Spalten.
+genetics_entry = ttk.Entry(plant_info_frame, state="readonly")
+genetics_entry.grid(row=1, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
 
 # Anzeige und Eingabe der Wachstumswoche.
 ttk.Label(plant_info_frame, text="Woche seit Keimung:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
-week_entry = ttk.Entry(plant_info_frame, width=10) # Schmaleres Feld.
-week_entry.grid(row=2, column=1, padx=5, pady=5, sticky="w")
-week_entry.bind("<Return>", lambda event: calculate()) # Neuberechnung bei Enter.
+week_entry = ttk.Entry(plant_info_frame, width=10)
+week_entry.grid(row=2, column=1, padx=5, pady=5, sticky="w") # sticky "w" to align left
+week_entry.bind("<Return>", lambda event: calculate())
 
 # Anzeige des Keimdatums.
 ttk.Label(plant_info_frame, text="Keimdatum:").grid(row=2, column=2, padx=5, pady=5, sticky="w")
 germination_date_entry = ttk.Entry(plant_info_frame, state="readonly", width=12)
-germination_date_entry.grid(row=2, column=3, padx=5, pady=5, sticky="w")
+germination_date_entry.grid(row=2, column=3, padx=5, pady=5, sticky="w") # sticky "w"
+
+# Label für aktuelles Schema
+active_scheme_label = ttk.Label(plant_info_frame, text="Aktives Schema: -", font=('TkDefaultFont', 9, 'italic'))
+active_scheme_label.grid(row=3, column=0, columnspan=4, padx=5, pady=(5,10), sticky="w")
+
 
 # Frame für Berechnungseingaben (Wassermenge).
 calc_input_frame = ttk.LabelFrame(window, text="Berechnungsgrundlage")
@@ -934,6 +1619,9 @@ water_amount_entry.bind("<Return>", lambda event: calculate()) # Neuberechnung b
 ec_button = ttk.Button(calc_input_frame, text="EC-Helper", command=ec_berechnen)
 ec_button.grid(row=0, column=2, padx=10, pady=5, sticky="e")
 
+# Label für den letzten EC-Helper Aufruf
+last_used_label: Optional[ttk.Label] = None # Declare as global for access in ec_berechnen
+
 # Frame für Düngerauswahl und Anzeige der Ergebnisse.
 fertilizer_frame = ttk.LabelFrame(window, text="Düngerauswahl & Ergebnisse (ml pro angegebene Wassermenge)")
 fertilizer_frame.grid(row=2, column=0, columnspan=3, padx=10, pady=5, sticky="nsew") # nsew = alle Richtungen (dehnt sich aus)
@@ -941,36 +1629,13 @@ fertilizer_frame.columnconfigure(0, weight=1) # Spalte für Checkbox-Texte dehnt
 fertilizer_frame.columnconfigure(1, minsize=80) # Mindestbreite für Ergebnis-Labels.
 window.rowconfigure(2, weight=1) # Zeile 2 im Hauptfenster (dieser Frame) dehnt sich vertikal aus.
 
-# Düngeroptionen - Liste wird dynamisch gefüllt, wenn F_DATA geladen ist.
-# Fallback-Liste, falls F_DATA aus irgendeinem Grund nicht korrekt geladen wird und das Programm nicht vorher beendet.
-fertilizer_options = [
-    "CalMag - Substrate - Prevention", "CalMag - Substrate - Correction",
-    "GreenHome Wachstumsduenger - Substrate", "GreenHome Bluetenduenger - Substrate",
-    "Fish-Mix (5-1-4) - Substrate", "Root-Juice"
-]
-if F_DATA: # Wenn F_DATA erfolgreich aus der Konfigurationsdatei geladen wurde.
-    fertilizer_options = list(F_DATA.keys()) # Verwende die Düngernamen aus der Konfiguration.
+# Düngeroptionen - Diese Liste wird nun NACH der Konfigurationsinitialisierung gefüllt.
+fertilizer_options: list[str] = [] # Platzhalter, wird später gefüllt
 
 # Listen zur Speicherung der Tkinter-Variablen für Checkboxen und der Ergebnis-Labels.
-fertilizer_vars = []
-checkboxes = []
-result_labels = []
-
-# Erstellung der Checkboxen und Ergebnis-Labels für jeden Düngertyp.
-for i, option_text in enumerate(fertilizer_options):
-    var = tk.IntVar() # Tkinter-Variable für den Zustand der Checkbox (0 oder 1).
-    fertilizer_vars.append(var)
-
-    # Lambda-Funktion für den Checkbox-Befehl, um den aktuellen Düngertyp zu binden.
-    cmd = lambda opt=option_text, v=var: calculate(opt, v)
-
-    checkbox = ttk.Checkbutton(fertilizer_frame, text=option_text, variable=var, command=cmd)
-    checkbox.grid(row=i, column=0, padx=5, pady=2, sticky="w") # Links im Frame platziert.
-    checkboxes.append(checkbox)
-
-    result_label = ttk.Label(fertilizer_frame, text="", width=10, anchor="e") # Rechtsbündig für Mengenangabe.
-    result_label.grid(row=i, column=1, padx=5, pady=2, sticky="e") # Rechts im Frame platziert.
-    result_labels.append(result_label)
+fertilizer_vars: list[tk.IntVar] = []
+checkboxes: list[ttk.Checkbutton] = []
+result_labels: list[ttk.Label] = []
 
 # Frame für Notizen zur Pflanze.
 info_frame = ttk.LabelFrame(window, text="Notizen zur Pflanze")
@@ -987,30 +1652,61 @@ save_button.grid(row=1, column=1, padx=5, pady=5, sticky="e") # Rechtsbündig im
 
 # Frame für Aktionen (Neue Pflanze, Pflanze löschen).
 action_frame = ttk.Frame(window)
-action_frame.grid(row=4, column=0, columnspan=3, padx=10, pady=10, sticky="e") # Rechtsbündig im Fenster.
+action_frame.grid(row=4, column=0, columnspan=3, padx=10, pady=10, sticky="e")
+
+manage_schemes_button = ttk.Button(action_frame, text="Manage Schemes", command=open_scheme_manager_window)
+manage_schemes_button.pack(side=tk.LEFT, padx=5)
 
 neue_pflanze_button = ttk.Button(action_frame, text="Neue Pflanze anlegen", command=neue_pflanze_hinzufuegen)
-neue_pflanze_button.pack(side=tk.LEFT, padx=5) # Buttons nebeneinander.
+neue_pflanze_button.pack(side=tk.LEFT, padx=5)
 
 loeschen_button = ttk.Button(action_frame, text="Pflanze löschen", command=pflanze_loeschen)
 loeschen_button.pack(side=tk.LEFT, padx=5)
 
 
 # --- Initialisierung der Anwendung ---
-# 1. Lade Konfiguration (Düngeschemata, EC-Werte). Bei Fehler wird Anwendung beendet.
+# 1. Lade Konfiguration. Bei Fehler wird Anwendung beendet.
 if initialize_config_and_exit_on_error(window):
-    # 2. Lade Pflanzendaten aus CSV.
-    plant_data = read_plant_data()
-    # 3. Fülle das Dropdown-Menü mit Pflanzennamen.
-    plant_dropdown['values'] = list(plant_data.keys())
-    # 4. Wähle ggf. die erste Pflanze aus und aktualisiere die GUI.
-    if plant_data:
-        plant_var.set(list(plant_data.keys())[0]) # Erste Pflanze als Standard auswählen.
-        update_week() # GUI-Felder basierend auf dieser Auswahl aktualisieren.
-    else:
-        update_week() # GUI-Felder leeren, wenn keine Pflanzen vorhanden sind.
+    # Globale Konfigurationsvariablen sind jetzt gesetzt (ALL_SCHEMES, ACTIVE_SCHEME_NAME, F_DATA, etc.)
+    # last_used_label is already global due to its definition outside any function.
 
-    # 5. Starte die Tkinter Hauptschleife.
+    # 2. Haupt-UI basierend auf dem aktiven Schema initialisieren
+    # Dies beinhaltet das Setzen von F_DATA, EC_TARGET_VALUES, Düngeroptionen, Checkboxes, etc.
+    update_main_ui_for_active_scheme() # Ruft auch update_week() intern auf.
+                                     # Stellt sicher, dass active_scheme_label Text bekommt.
+
+    # Erstelle das Label für den Zeitstempel im calc_input_frame
+    # Needs to be after calc_input_frame is defined, but before mainloop
+    # Position it below the water amount entry or EC-Helper button
+    # Let's try to place it in a new row within calc_input_frame or a separate status bar frame
+    # For simplicity, adding to calc_input_frame for now.
+    last_used_label = ttk.Label(calc_input_frame, text="EC Helper last used: Not yet")
+    last_used_label.grid(row=1, column=0, columnspan=3, padx=5, pady=(5,0), sticky="w")
+
+
+    # Lade und zeige den letzten EC-Helper Zeitstempel an
+    app_status = load_app_status()
+    last_ec_timestamp = app_status.get("last_ec_helper_usage")
+    if last_ec_timestamp:
+        last_used_label.config(text=f"EC Helper last used: {last_ec_timestamp}")
+
+    # 3. Lade Pflanzendaten aus CSV.
+    plant_data = read_plant_data()
+    # 4. Fülle das Dropdown-Menü mit Pflanzennamen.
+    plant_dropdown['values'] = list(plant_data.keys())
+    # 5. Wähle ggf. die erste Pflanze aus und aktualisiere die GUI.
+    if plant_data:
+        plant_var.set(list(plant_data.keys())[0])
+        # update_week() wird bereits durch update_main_ui_for_active_scheme aufgerufen,
+        # aber wenn keine Pflanze ausgewählt ist, müssen die Felder ggf. initial geleert werden.
+        # Wenn eine Pflanze ausgewählt wird, triggert das sowieso update_week.
+        # Ein expliziter Aufruf hier ist sicher, um den Zustand nach Pflanzenauswahl zu setzen.
+        update_week()
+    else:
+        # Stellt sicher, dass die pflanzenspezifischen Felder leer sind, wenn keine Pflanzen vorhanden sind.
+        update_week()
+
+    # 6. Starte die Tkinter Hauptschleife.
     window.mainloop()
-# Wenn initialize_config_and_exit_on_error() False zurückgibt (kritischer Ladefehler),
-# wurde window.destroy() bereits aufgerufen, und die mainloop wird nicht gestartet.
+# Wenn initialize_config_and_exit_on_error() False zurückgibt,
+# wurde window.destroy() bereits aufgerufen und die mainloop wird nicht gestartet (oder sys.exit wurde aufgerufen).
