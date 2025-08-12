@@ -120,14 +120,26 @@ def calculate_fertilizer_amount(week: int, water_amount: float, fertilizer_type:
     Returns:
         Die Düngemenge in Millilitern (float) oder None bei ungültigem Typ/Woche.
     """
-    # Dosierungen pro Liter Wasser (ml/L)
+    # Dosierungen pro Liter Wasser (ml/L) - Biobizz Schema
     fertilizer_data = {
-        "CalMag - Substrate - Prevention": {1: 0.3, 2: 0.3, 3: 0.3, 4: 0.4, 5: 0.4, 6: 0.5, 7: 0.6, 8: 0.7, 9: 0.8, 10: 0.8, 11: 0.8, 12: 0.8, 13: 0.8, 14: 0.8, 15: 0.8, 16: 0.8, 17: 0.8, 18: 0.8, 19: 0.8, 20: 0.8},
-        "CalMag - Substrate - Correction": {1: 0.5, 2: 0.5, 3: 0.5, 4: 0.6, 5: 0.6, 6: 0.8, 7: 0.8, 8: 1.0, 9: 1.1, 10: 1.2, 11: 1.2, 12: 1.2, 13: 1.2, 14: 1.2, 15: 1.2, 16: 1.2, 17: 1.2, 18: 1.2, 19: 1.2, 20: 1.2},
-        "GreenHome Wachstumsduenger - Substrate": {1: 2.0, 2: 2.27, 3: 2.54, 4: 2.81, 5: 3.08, 6: 3.35, 7: 3.62, 8: 3.89, 9: 4.16, 10: 4.45, 11: 4.45, 12: 4.45, 13: 4.45, 14: 4.45, 15: 4.45, 16: 4.45, 17: 4.45, 18: 4.45, 19: 4.45, 20: 4.45},
-        "GreenHome Bluetenduenger - Substrate": {1: 3.0, 2: 3.33, 3: 3.67, 4: 4.0, 5: 4.33, 6: 4.67, 7: 5.0, 8: 5.33, 9: 5.67, 10: 6.0, 11: 6.0, 12: 6.0, 13: 6.0, 14: 6.0, 15: 6.0, 16: 6.0, 17: 6.0, 18: 6.0, 19: 6.0, 20: 6.0},
-        "Fish-Mix (5-1-4) - Substrate": {1: 0.0, 2: 2.0, 3: 2.0, 4: 2.0, 5: 3.0, 6: 3.0, 7: 4.0, 8: 4.0, 9: 4.0, 10: 4.0, 11: 4.0, 12: 4.0, 13: 4.0, 14: 4.0, 15: 4.0, 16: 4.0, 17: 4.0, 18: 4.0, 19: 4.0, 20: 4.0}, # Woche 1 explizit 0
-        "Root-Juice": {1: 4.0, 2: 4.0, 3: 4.0, 4: 4.0, 5: 4.0, 6: 4.0, 7: 4.0, 8: 4.0, 9: 4.0, 10: 4.0, 11: 4.0, 12: 4.0, 13: 4.0, 14: 4.0, 15: 4.0, 16: 4.0, 17: 4.0, 18: 4.0, 19: 4.0, 20: 4.0}
+        # Biobizz Hauptdünger
+        "Bio-Grow": {1: 2, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 4, 8: 4, 9: 4, 10: 4, 11: 0, 12: 0},
+        "Bio-Bloom": {1: 0, 2: 0, 3: 2, 4: 3, 5: 3, 6: 3, 7: 4, 8: 4, 9: 4, 10: 4, 11: 0, 12: 0},
+        "Top-Max": {1: 0, 2: 0, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1, 8: 4, 9: 4, 10: 4, 11: 0, 12: 0},
+        "Bio-Heaven": {1: 2, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 4, 8: 5, 9: 5, 10: 5, 11: 0, 12: 0},
+        "Alg-A-Mic": {1: 0, 2: 0, 3: 2, 4: 2, 5: 3, 6: 3, 7: 3, 8: 4, 9: 4, 10: 4, 11: 0, 12: 0},
+        "Acti-Vera": {1: 2, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 4, 8: 5, 9: 5, 10: 5, 11: 0, 12: 0},
+        "Root-Juice": {1: 4, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0, 12: 0},
+        # Fish-Mix als Alternative zu Bio-Grow in der Veg-Phase
+        "Fish-Mix": {1: 2, 2: 2, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0, 12: 0},
+        # CalMag Schedules
+        "CalMag - Prevention (Biobizz)": {
+            1: 0.3, 2: 0.3, 3: 0.3, 4: 0.3, 5: 0.3, 6: 0.5, 7: 0.5, 8: 0.8, 9: 0.8, 10: 0.8
+        },
+        "CalMag - Correction (Biobizz)": {
+            1: 0.0, 2: 0.18, 3: 0.38, 4: 0.59, 5: 0.74, 6: 0.89, 7: 1.04, 8: 1.2,
+            9: 1.43, 10: 1.66, 11: 1.89, 12: 2.12, 13: 2.35, 14: 2.58, 15: 2.81, 16: 3.04
+        }
     }
 
     if fertilizer_type not in fertilizer_data:
@@ -650,9 +662,8 @@ fertilizer_frame.columnconfigure(1, minsize=80) # Mindestbreite für Ergebnisse
 window.rowconfigure(2, weight=1) # Zeile 2 im Hauptfenster soll sich ausdehnen
 
 fertilizer_options = [
-    "CalMag - Substrate - Prevention", "CalMag - Substrate - Correction",
-    "GreenHome Wachstumsduenger - Substrate", "GreenHome Bluetenduenger - Substrate",
-    "Fish-Mix (5-1-4) - Substrate", "Root-Juice"
+    "Bio-Grow", "Bio-Bloom", "Top-Max", "Bio-Heaven", "Alg-A-Mic", "Acti-Vera",
+    "Root-Juice", "Fish-Mix", "CalMag - Prevention (Biobizz)", "CalMag - Correction (Biobizz)"
 ]
 fertilizer_vars = []
 checkboxes = []
