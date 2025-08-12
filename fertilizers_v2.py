@@ -150,22 +150,19 @@ def calculate_fertilizer_amount(week: int, water_amount: float, fertilizer_type:
         }
     }
 
-    # Basisname des Düngers extrahieren (z.B. "Fish-Mix" aus "Fish-Mix (abweichend vom Schema)")
-    base_fertilizer_type = fertilizer_type.split(" (")[0]
-
-    if base_fertilizer_type not in fertilizer_data:
-        print(f"Warnung: Unbekannter Düngertyp '{base_fertilizer_type}'")
+    if fertilizer_type not in fertilizer_data:
+        print(f"Warnung: Unbekannter Düngertyp '{fertilizer_type}'")
         return None
 
     # Wähle die maximale definierte Woche, wenn die aktuelle Woche darüber liegt
-    max_defined_week = max(fertilizer_data[base_fertilizer_type].keys())
+    max_defined_week = max(fertilizer_data[fertilizer_type].keys())
     effective_week = min(week, max_defined_week) if week > 0 else 1 # Mindestens Woche 1 verwenden, falls week <= 0
 
-    dosage_per_liter = fertilizer_data[base_fertilizer_type].get(effective_week)
+    dosage_per_liter = fertilizer_data[fertilizer_type].get(effective_week)
 
     if dosage_per_liter is None:
         # Sollte durch min/max nicht passieren, aber sicherheitshalber
-        print(f"Warnung: Keine Dosierung für Woche {effective_week} bei '{base_fertilizer_type}' gefunden.")
+        print(f"Warnung: Keine Dosierung für Woche {effective_week} bei '{fertilizer_type}' gefunden.")
         return 0.0 # Oder None? Hier 0.0 um Fehler zu vermeiden
 
     fertilizer_amount = dosage_per_liter * water_amount
@@ -222,9 +219,7 @@ def apply_preset(event=None):
 
     # Setze Checkboxen basierend auf dem Preset
     for i, option in enumerate(fertilizer_options):
-        # Extrahiere den Basisnamen des Düngers zum Abgleich mit der Preset-Liste
-        base_option = option.split(" (")[0]
-        if base_option in preset:
+        if option in preset:
             fertilizer_vars[i].set(1)
         else:
             fertilizer_vars[i].set(0)
