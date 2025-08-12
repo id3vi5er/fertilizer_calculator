@@ -106,6 +106,14 @@ def save_plant_data_to_csv(data_to_save: Dict[str, Dict[str, Any]]):
     except Exception as e:
          messagebox.showerror("Unerwarteter Speicherfehler", f"Ein Fehler ist beim Speichern der Pflanzendaten aufgetreten:\n{e}")
 
+# --- Phasen und Presets ---
+PHASEN_WOCHEN = {
+    "Vegetativ": list(range(1, 3)), # Woche 1-2
+    "Blüte": list(range(3, 11))      # Woche 3-10
+}
+VEGGIE_PRESET = ["Bio-Grow", "Root-Juice", "Fish-Mix", "CalMag - Correction (Biobizz)"]
+BLUETE_PRESET = ["Bio-Bloom", "Top-Max", "Fish-Mix", "CalMag - Correction (Biobizz)"]
+
 # --- Düngeberechnungen ---
 
 def calculate_fertilizer_amount(week: int, water_amount: float, fertilizer_type: str) -> Optional[float]:
@@ -120,14 +128,26 @@ def calculate_fertilizer_amount(week: int, water_amount: float, fertilizer_type:
     Returns:
         Die Düngemenge in Millilitern (float) oder None bei ungültigem Typ/Woche.
     """
-    # Dosierungen pro Liter Wasser (ml/L)
+    # Dosierungen pro Liter Wasser (ml/L) - Biobizz Schema
     fertilizer_data = {
-        "CalMag - Substrate - Prevention": {1: 0.3, 2: 0.3, 3: 0.3, 4: 0.4, 5: 0.4, 6: 0.5, 7: 0.6, 8: 0.7, 9: 0.8, 10: 0.8, 11: 0.8, 12: 0.8, 13: 0.8, 14: 0.8, 15: 0.8, 16: 0.8, 17: 0.8, 18: 0.8, 19: 0.8, 20: 0.8},
-        "CalMag - Substrate - Correction": {1: 0.5, 2: 0.5, 3: 0.5, 4: 0.6, 5: 0.6, 6: 0.8, 7: 0.8, 8: 1.0, 9: 1.1, 10: 1.2, 11: 1.2, 12: 1.2, 13: 1.2, 14: 1.2, 15: 1.2, 16: 1.2, 17: 1.2, 18: 1.2, 19: 1.2, 20: 1.2},
-        "GreenHome Wachstumsduenger - Substrate": {1: 2.0, 2: 2.27, 3: 2.54, 4: 2.81, 5: 3.08, 6: 3.35, 7: 3.62, 8: 3.89, 9: 4.16, 10: 4.45, 11: 4.45, 12: 4.45, 13: 4.45, 14: 4.45, 15: 4.45, 16: 4.45, 17: 4.45, 18: 4.45, 19: 4.45, 20: 4.45},
-        "GreenHome Bluetenduenger - Substrate": {1: 3.0, 2: 3.33, 3: 3.67, 4: 4.0, 5: 4.33, 6: 4.67, 7: 5.0, 8: 5.33, 9: 5.67, 10: 6.0, 11: 6.0, 12: 6.0, 13: 6.0, 14: 6.0, 15: 6.0, 16: 6.0, 17: 6.0, 18: 6.0, 19: 6.0, 20: 6.0},
-        "Fish-Mix (5-1-4) - Substrate": {1: 0.0, 2: 2.0, 3: 2.0, 4: 2.0, 5: 3.0, 6: 3.0, 7: 4.0, 8: 4.0, 9: 4.0, 10: 4.0, 11: 4.0, 12: 4.0, 13: 4.0, 14: 4.0, 15: 4.0, 16: 4.0, 17: 4.0, 18: 4.0, 19: 4.0, 20: 4.0}, # Woche 1 explizit 0
-        "Root-Juice": {1: 4.0, 2: 4.0, 3: 4.0, 4: 4.0, 5: 4.0, 6: 4.0, 7: 4.0, 8: 4.0, 9: 4.0, 10: 4.0, 11: 4.0, 12: 4.0, 13: 4.0, 14: 4.0, 15: 4.0, 16: 4.0, 17: 4.0, 18: 4.0, 19: 4.0, 20: 4.0}
+        # Biobizz Hauptdünger
+        "Bio-Grow": {1: 2, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 4, 8: 4, 9: 4, 10: 4, 11: 0, 12: 0},
+        "Bio-Bloom": {1: 0, 2: 0, 3: 2, 4: 3, 5: 3, 6: 3, 7: 4, 8: 4, 9: 4, 10: 4, 11: 0, 12: 0},
+        "Top-Max": {1: 0, 2: 0, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1, 8: 4, 9: 4, 10: 4, 11: 0, 12: 0},
+        "Bio-Heaven": {1: 2, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 4, 8: 5, 9: 5, 10: 5, 11: 0, 12: 0},
+        "Alg-A-Mic": {1: 0, 2: 0, 3: 2, 4: 2, 5: 3, 6: 3, 7: 3, 8: 4, 9: 4, 10: 4, 11: 0, 12: 0},
+        "Acti-Vera": {1: 2, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 4, 8: 5, 9: 5, 10: 5, 11: 0, 12: 0},
+        "Root-Juice": {1: 4, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0, 12: 0},
+        # Fish-Mix als Alternative zu Bio-Grow in der Veg-Phase (mit Anpassung für Blüte)
+        "Fish-Mix": {1: 2, 2: 2, 3: 2, 4: 2, 5: 2, 6: 2, 7: 2, 8: 2, 9: 2, 10: 2, 11: 0, 12: 0},
+        # CalMag Schedules
+        "CalMag - Prevention (Biobizz)": {
+            1: 0.3, 2: 0.3, 3: 0.3, 4: 0.3, 5: 0.3, 6: 0.5, 7: 0.5, 8: 0.8, 9: 0.8, 10: 0.8
+        },
+        "CalMag - Correction (Biobizz)": {
+            1: 0.0, 2: 0.18, 3: 0.38, 4: 0.59, 5: 0.74, 6: 0.89, 7: 1.04, 8: 1.2,
+            9: 1.43, 10: 1.66, 11: 1.89, 12: 2.12, 13: 2.35, 14: 2.58, 15: 2.81, 16: 3.04
+        }
     }
 
     if fertilizer_type not in fertilizer_data:
@@ -188,16 +208,38 @@ def berechne_bluetenduenger_menge_fuer_ec(EC_ist: float, EC_soll: float, wasserm
 
 # --- GUI Callbacks und Hilfsfunktionen ---
 
+def apply_preset(event=None):
+    """Stellt die Checkboxen basierend auf der ausgewählten Phase ein."""
+    selected_phase = phase_var.get()
+    preset = []
+    if selected_phase == "Vegetativ":
+        preset = VEGGIE_PRESET
+    elif selected_phase == "Blüte":
+        preset = BLUETE_PRESET
+
+    # Setze Checkboxen basierend auf dem Preset
+    for i, option in enumerate(fertilizer_options):
+        if option in preset:
+            fertilizer_vars[i].set(1)
+        else:
+            fertilizer_vars[i].set(0)
+
+    # Starte die Neuberechnung, nachdem das Preset angewendet wurde
+    calculate()
+
+
 def update_week(event=None):
     """
-    Aktualisiert die GUI-Felder (Woche, Keimdatum, Genetik, Infos, EC)
-    basierend auf der ausgewählten Pflanze.
+    Aktualisiert die GUI-Felder basierend auf der ausgewählten Pflanze.
+    Setzt die Standardwerte für die manuelle Berechnung.
     """
     try:
         selected_plant = plant_var.get()
         if not selected_plant or selected_plant not in plant_data:
-            # Keine oder ungültige Pflanze ausgewählt -> Felder leeren
-            week_entry.delete(0, tk.END)
+            # Leere alle Felder, wenn keine Pflanze ausgewählt ist
+            auto_week_label.config(text="-")
+            phase_var.set("")
+            calc_week_var.set(0)
             germination_date_entry.config(state="normal")
             germination_date_entry.delete(0, tk.END)
             germination_date_entry.config(state="readonly")
@@ -206,11 +248,11 @@ def update_week(event=None):
             genetics_entry.config(state="readonly")
             info_text.config(state="normal")
             info_text.delete("1.0", tk.END)
-            info_text.config(state="disabled") # Deaktivieren, wenn keine Pflanze
+            info_text.config(state="disabled")
             ec_label.config(text="EC-Ziel (Erde): -")
             for label in result_labels:
                 label.config(text="")
-            save_button.config(state="disabled") # Speichern-Button deaktivieren
+            save_button.config(state="disabled")
             return
 
         # Pflanze ausgewählt -> Felder füllen
@@ -219,108 +261,100 @@ def update_week(event=None):
         today = datetime.today()
 
         delta_days = (today - germination_date).days
-        current_week = max(1, (delta_days // 7 + 1)) # Mindestens Woche 1
+        current_week = max(1, (delta_days // 7 + 1))
 
-        week_entry.delete(0, tk.END)
-        week_entry.insert(0, str(current_week))
-
+        # Info-Felder aktualisieren
+        auto_week_label.config(text=str(current_week))
         germination_date_entry.config(state="normal")
         germination_date_entry.delete(0, tk.END)
         germination_date_entry.insert(0, germination_date.strftime('%d.%m.%Y'))
         germination_date_entry.config(state="readonly")
-
         genetics_entry.config(state="normal")
         genetics_entry.delete(0, tk.END)
         genetics_entry.insert(0, plant_info["Genetik"])
         genetics_entry.config(state="readonly")
-
         info_text.config(state="normal")
         info_text.delete("1.0", tk.END)
         info_text.insert("1.0", plant_info["Infos"])
-        # info_text bleibt normal, da bearbeitbar
+        save_button.config(state="normal")
 
-        save_button.config(state="normal") # Speichern-Button aktivieren
+        # Standardwerte für manuelle Berechnung setzen
+        current_phase = "Blüte"  # Standard
+        if current_week in PHASEN_WOCHEN["Vegetativ"]:
+            current_phase = "Vegetativ"
+        phase_var.set(current_phase)
+        calc_week_var.set(current_week)
 
-        # Berechnungen und EC-Wert aktualisieren
-        calculate()
+        # Preset anwenden und Neuberechnung anstoßen
+        apply_preset()
         update_ec_value()
 
     except Exception as e:
          messagebox.showerror("Fehler beim Aktualisieren", f"Ein unerwarteter Fehler ist in update_week aufgetreten:\n{e}")
-         # Ggf. GUI Felder leeren
-         # ... (Code zum Leeren wie oben)
 
 
-def calculate(fertilizer_type: Optional[str] = None, var: Optional[tk.IntVar] = None):
+def calculate(event=None):
     """
     Berechnet die Düngermenge für ausgewählte Dünger und aktualisiert die Labels.
-    Wird durch Checkbox-Änderungen oder manuell aufgerufen.
+    Wird durch Checkbox-Änderungen oder manuelle Auswahl ausgelöst.
     """
     try:
-        # Prüfen, ob eine Pflanze ausgewählt ist (indirekt über Woche)
-        week_str = week_entry.get()
-        if not week_str:
-             # Keine Woche -> keine Berechnung
-             for result_label in result_labels:
-                 result_label.config(text="")
-             return
+        # Hole die Berechnungswoche aus dem neuen Dropdown-Menü
+        try:
+            week = calc_week_var.get()
+            if week == 0: # Passiert, wenn keine Pflanze ausgewählt ist
+                return
+        except (tk.TclError, ValueError):
+            # Variable ist noch nicht gesetzt oder leer
+            for result_label in result_labels:
+                result_label.config(text="")
+            return
 
-        week = int(week_str)
         water_amount_str = water_amount_entry.get()
         water_amount = float(water_amount_str) if water_amount_str else 0.0
 
         if water_amount <= 0:
-            # Keine Wassermenge -> keine Berechnung (oder Warnung?)
             for result_label in result_labels:
                  result_label.config(text="")
-            # Optional: messagebox.showwarning("Ungültige Eingabe", "Bitte eine positive Wassermenge eingeben.")
             return
 
-        # Berechne alle oder nur einen bestimmten Dünger
-        for i, (checkbox, f_var, result_label) in enumerate(zip(checkboxes, fertilizer_vars, result_labels)):
+        # Berechne alle Dünger, die angehakt sind
+        for i, (f_var, result_label) in enumerate(zip(fertilizer_vars, result_labels)):
             current_fertilizer_type = fertilizer_options[i]
 
-            # Nur den geänderten berechnen, wenn Typ übergeben wurde
-            if fertilizer_type is not None and current_fertilizer_type != fertilizer_type:
-                continue
-
-            if f_var.get() == 1: # Wenn Checkbox aktiviert ist
+            if f_var.get() == 1:
                 result = calculate_fertilizer_amount(week, water_amount, current_fertilizer_type)
                 if result is not None:
                     result_label.config(text=f"{result:.2f} ml")
                 else:
-                     result_label.config(text="Fehler") # Bei ungültigem Typ
-            else: # Checkbox nicht aktiviert
+                     result_label.config(text="Fehler")
+            else:
                 result_label.config(text="")
 
     except ValueError:
-        # Fehler bei Konvertierung von Woche oder Wassermenge
         for result_label in result_labels:
-             result_label.config(text="") # Alle Ergebnisse leeren
-        # Optional: Direkteres Feedback geben
-        # messagebox.showerror("Ungültige Eingabe", "Bitte gültige Zahlen für Woche und Wassermenge eingeben.")
+             result_label.config(text="")
     except Exception as e:
         messagebox.showerror("Berechnungsfehler", f"Ein Fehler ist bei der Berechnung aufgetreten:\n{e}")
 
 
-def update_ec_value():
+def update_ec_value(event=None):
     """Berechnet und aktualisiert das EC-Zielwert-Label in der GUI."""
     try:
-        week_str = week_entry.get()
-        if not week_str:
+        week = calc_week_var.get()
+        if week == 0:
             ec_label.config(text="EC-Ziel (Erde): -")
             return
 
-        week = int(week_str)
-        ec_value_ms = get_ec_value(week) # Wert in mS/cm
+        ec_value_ms = get_ec_value(week)
 
         if ec_value_ms is not None:
-            ec_value_us = ec_value_ms * 1000 # Umrechnung in µS/cm
-            ec_label.config(text=f"EC-Ziel (Erde): {ec_value_us:.0f} µS/cm") # Ohne Nachkommastellen
+            ec_value_us = ec_value_ms * 1000
+            ec_label.config(text=f"EC-Ziel (Erde): {ec_value_us:.0f} µS/cm")
         else:
             ec_label.config(text="EC-Ziel (Erde): -")
-    except ValueError:
-        ec_label.config(text="EC-Ziel (Erde): -") # Bei ungültiger Woche
+    except (tk.TclError, ValueError):
+        ec_label.config(text="EC-Ziel (Erde): -")
     except Exception as e:
         ec_label.config(text="EC-Ziel (Erde): Fehler")
         print(f"Fehler in update_ec_value: {e}")
@@ -349,10 +383,8 @@ def neue_pflanze_hinzufuegen():
         neuer_pflanzenname = pflanzenname_entry.get().strip()
         neues_keimdatum_str = keimdatum_entry.get().strip()
         neue_genetik = genetik_entry.get().strip()
-        # Infos sind optional, daher kein .strip() nötig wenn leer erlaubt
         neue_infos = infos_text_new.get("1.0", tk.END).strip()
 
-        # --- Validierung ---
         errors = []
         if not neuer_pflanzenname:
             errors.append("Pflanzenname fehlt.")
@@ -371,31 +403,24 @@ def neue_pflanze_hinzufuegen():
 
         if not neue_genetik:
             errors.append("Genetik fehlt.")
-        # Infos sind optional, keine Prüfung
 
         if errors:
             fehler_label.config(text="\n".join(errors))
             return
-        # --- Ende Validierung ---
 
         try:
-            # Keimdatum nochmal holen (falls oben nur geprüft)
             keimdatum_objekt = datetime.strptime(neues_keimdatum_str, '%d.%m.%Y')
-
-            # Pflanze zu plant_data hinzufügen
             plant_data[neuer_pflanzenname] = {
                 "Keimdatum": keimdatum_objekt,
                 "Genetik": neue_genetik,
                 "Infos": neue_infos
             }
-
             save_plant_data_to_csv(plant_data)
 
-            # Hauptfenster aktualisieren
             plant_keys = list(plant_data.keys())
             plant_dropdown['values'] = plant_keys
             plant_var.set(neuer_pflanzenname)
-            update_week() # Aktualisiert alle abhängigen Felder
+            update_week()
 
             new_plant_window.destroy()
             messagebox.showinfo("Erfolg", f"Pflanze '{neuer_pflanzenname}' erfolgreich hinzugefügt.")
@@ -404,17 +429,13 @@ def neue_pflanze_hinzufuegen():
              fehler_label.config(text=f"Speicherfehler: {e}")
 
 
-    # --- Fenster für neue Pflanze erstellen ---
     new_plant_window = tk.Toplevel(window)
     new_plant_window.title("Neue Pflanze hinzufügen")
-    new_plant_window.transient(window) # Modal über Hauptfenster
-    new_plant_window.grab_set()     # Eingabefokus erzwingen
-    new_plant_window.resizable(False, False) # Größe nicht änderbar
-
-    # Grid-Konfiguration
+    new_plant_window.transient(window)
+    new_plant_window.grab_set()
+    new_plant_window.resizable(False, False)
     new_plant_window.columnconfigure(1, weight=1)
 
-    # Eingabefelder (mit ttk)
     ttk.Label(new_plant_window, text="Name:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
     pflanzenname_entry = ttk.Entry(new_plant_window, width=40)
     pflanzenname_entry.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
@@ -428,26 +449,22 @@ def neue_pflanze_hinzufuegen():
     genetik_entry.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
 
     ttk.Label(new_plant_window, text="Infos:").grid(row=3, column=0, padx=10, pady=5, sticky="nw")
-    # ScrolledText für potenziell längere Infos
     infos_text_new = scrolledtext.ScrolledText(new_plant_window, height=6, width=40, wrap=tk.WORD)
     infos_text_new.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
 
-    # Fehleranzeige
     fehler_label = ttk.Label(new_plant_window, text="", foreground="red", wraplength=300)
     fehler_label.grid(row=4, column=0, columnspan=2, padx=10, pady=5, sticky="w")
 
-    # Buttons Frame
     button_frame = ttk.Frame(new_plant_window)
     button_frame.grid(row=5, column=0, columnspan=2, pady=10)
 
     speichern_button = ttk.Button(button_frame, text="Speichern", command=pflanze_speichern)
     speichern_button.pack(side=tk.RIGHT, padx=5)
-
     abbrechen_button = ttk.Button(button_frame, text="Abbrechen", command=new_plant_window.destroy)
     abbrechen_button.pack(side=tk.RIGHT, padx=5)
 
-    pflanzenname_entry.focus_set() # Fokus auf erstes Feld
-    new_plant_window.wait_window() # Warten bis Fenster geschlossen wird
+    pflanzenname_entry.focus_set()
+    new_plant_window.wait_window()
 
 
 def pflanze_loeschen():
@@ -462,15 +479,14 @@ def pflanze_loeschen():
             del plant_data[selected_plant]
             save_plant_data_to_csv(plant_data)
 
-            # Hauptfenster aktualisieren
             plant_keys = list(plant_data.keys())
             plant_dropdown['values'] = plant_keys
             if plant_keys:
-                plant_var.set(plant_keys[0]) # Erste verbleibende auswählen
+                plant_var.set(plant_keys[0])
             else:
-                plant_var.set("") # Combobox leeren
+                plant_var.set("")
 
-            update_week() # GUI aktualisieren (leert Felder etc.)
+            update_week()
             messagebox.showinfo("Gelöscht", f"Pflanze '{selected_plant}' wurde gelöscht.")
         except Exception as e:
             messagebox.showerror("Fehler beim Löschen", f"Konnte Pflanze nicht löschen:\n{e}")
@@ -489,7 +505,6 @@ def ec_berechnen():
     def duenger_berechnen():
         """Berechnet die benötigte Menge Wachstums- ODER Blütedünger."""
         try:
-            # EC-Ist Wert holen und validieren
             ec_ist_str = ec_ist_entry.get()
             if not ec_ist_str:
                 raise ValueError("Aktueller EC-Wert fehlt.")
@@ -497,7 +512,6 @@ def ec_berechnen():
             if ec_ist < 0:
                  raise ValueError("Aktueller EC-Wert darf nicht negativ sein.")
 
-            # Wassermenge aus Hauptfenster holen und validieren
             wassermenge_str = water_amount_entry.get()
             if not wassermenge_str:
                  raise ValueError("Wassermenge im Hauptfenster fehlt.")
@@ -505,9 +519,8 @@ def ec_berechnen():
             if wassermenge <= 0:
                  raise ValueError("Wassermenge muss positiv sein.")
 
-            # EC-Sollwert ermitteln
             if ec_soll_var.get() == "vorhanden":
-                ec_soll_text = ec_label.cget("text") # Format: "EC-Ziel (Erde): 1200 µS/cm"
+                ec_soll_text = ec_label.cget("text")
                 if ":" not in ec_soll_text or "µS/cm" not in ec_soll_text:
                      raise ValueError("Ziel-EC-Wert im Hauptfenster nicht verfügbar oder ungültig.")
                 ec_soll_str = ec_soll_text.split(":")[1].strip().split()[0]
@@ -524,11 +537,9 @@ def ec_berechnen():
                  ergebnis_label.config(text="Aktueller EC ist bereits über oder gleich dem Soll-EC.\nKein Dünger benötigt.", foreground="blue")
                  return
 
-            # Berechnung für beide Düngerarten durchführen
             menge_wachstum = berechne_wachstumduenger_menge_fuer_ec(ec_ist, ec_soll, wassermenge)
             menge_bluete = berechne_bluetenduenger_menge_fuer_ec(ec_ist, ec_soll, wassermenge)
 
-            # Ergebnis anzeigen (Erklären, dass es Alternativen sind)
             ergebnis_text = (
                 f"Um {ec_soll:.0f} µS/cm zu erreichen, fügen Sie hinzu:\n\n"
                 f"-> ENTWEDER {menge_wachstum:.2f} ml Wachstumsdünger\n"
@@ -542,117 +553,120 @@ def ec_berechnen():
         except Exception as e:
             ergebnis_label.config(text=f"Fehler: {e}", foreground="red")
 
-    # --- Fenster für EC-Berechnung erstellen ---
     ec_window = tk.Toplevel(window)
     ec_window.title("EC-Helper: Dünger berechnen")
     ec_window.transient(window)
     ec_window.grab_set()
     ec_window.resizable(False, False)
-
-    # Grid
     ec_window.columnconfigure(1, weight=1)
 
-    # Eingabefelder
     ttk.Label(ec_window, text="Aktueller EC (µS/cm):").grid(row=0, column=0, padx=10, pady=5, sticky="w")
     ec_ist_entry = ttk.Entry(ec_window, width=25)
     ec_ist_entry.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
 
     ttk.Label(ec_window, text="Soll-EC (µS/cm):").grid(row=1, column=0, padx=10, pady=5, sticky="w")
-    ec_soll_frame = ttk.Frame(ec_window) # Frame für Dropdown und Entry
+    ec_soll_frame = ttk.Frame(ec_window)
     ec_soll_frame.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
     ec_soll_frame.columnconfigure(1, weight=1)
 
-    ec_soll_var = tk.StringVar(value="vorhanden") # Standard: Wert aus Hauptfenster nehmen
-    ec_soll_var.trace_add("write", toggle_ec_soll_entry) # Callback bei Änderung
+    ec_soll_var = tk.StringVar(value="vorhanden")
+    ec_soll_var.trace_add("write", toggle_ec_soll_entry)
 
     ec_soll_dropdown = ttk.OptionMenu(ec_soll_frame, ec_soll_var, "vorhanden", "vorhanden", "manuell")
     ec_soll_dropdown.grid(row=0, column=0, padx=(0, 5))
-
-    ec_soll_entry = ttk.Entry(ec_soll_frame, width=15, state="disabled") # Standardmäßig deaktiviert
+    ec_soll_entry = ttk.Entry(ec_soll_frame, width=15, state="disabled")
     ec_soll_entry.grid(row=0, column=1, sticky="ew")
 
-    # Berechnen Button
     berechnen_button = ttk.Button(ec_window, text="Düngermengen berechnen", command=duenger_berechnen)
     berechnen_button.grid(row=2, column=0, columnspan=2, pady=10)
 
-    # Ergebnisanzeige
     ergebnis_label = ttk.Label(ec_window, text="Geben Sie den aktuellen EC-Wert ein.", wraplength=350, justify=tk.LEFT)
     ergebnis_label.grid(row=3, column=0, columnspan=2, padx=10, pady=10, sticky="w")
 
     ec_ist_entry.focus_set()
-    toggle_ec_soll_entry() # Initialen Status des Entry-Felds setzen
+    toggle_ec_soll_entry()
     ec_window.wait_window()
 
 
 # --- Haupt-GUI Erstellung ---
 window = tk.Tk()
-window.title("Pflanzen Düngerberechnung v1.1")
-window.minsize(550, 550) # Mindestgröße für bessere Lesbarkeit
+window.title("Pflanzen Düngerberechnung v1.2") # Version erhöht
+window.minsize(550, 600)
 
-# Style (optional, für besseres Aussehen)
 style = ttk.Style()
-# style.theme_use('clam') # Alternativen: 'alt', 'default', 'classic', 'vista', 'xpnative'
-
-# Grid Konfiguration für Hauptfenster
-window.columnconfigure(1, weight=1) # Spalte 1 soll sich ausdehnen
+window.columnconfigure(1, weight=1)
 
 # --- Widgets ---
 
-# Frame für Pflanzenauswahl und Basisinfos
 plant_info_frame = ttk.LabelFrame(window, text="Pflanzeninformationen")
 plant_info_frame.grid(row=0, column=0, columnspan=3, padx=10, pady=10, sticky="ew")
 plant_info_frame.columnconfigure(1, weight=1)
 
 ttk.Label(plant_info_frame, text="Pflanze:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
 plant_var = tk.StringVar()
-plant_dropdown = ttk.Combobox(plant_info_frame, textvariable=plant_var, state="readonly") # Readonly verhindert Tippen
+plant_dropdown = ttk.Combobox(plant_info_frame, textvariable=plant_var, state="readonly")
 plant_dropdown.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
 plant_dropdown.bind("<<ComboboxSelected>>", update_week)
 
-# EC-Ziel Label (aktualisiert durch update_week)
 ec_label = ttk.Label(plant_info_frame, text="EC-Ziel (Erde): -", font=('TkDefaultFont', 9, 'bold'))
 ec_label.grid(row=0, column=2, padx=10, pady=5, sticky="e")
 
 ttk.Label(plant_info_frame, text="Genetik:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
 genetics_entry = ttk.Entry(plant_info_frame, state="readonly")
-genetics_entry.grid(row=1, column=1, columnspan=2, padx=5, pady=5, sticky="ew") # Über 2 Spalten
+genetics_entry.grid(row=1, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
 
-ttk.Label(plant_info_frame, text="Woche seit Keimung:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
-week_entry = ttk.Entry(plant_info_frame, width=10) # Schmaler machen
-week_entry.grid(row=2, column=1, padx=5, pady=5, sticky="w")
-# Bind Enter key on week entry to recalculate
-week_entry.bind("<Return>", lambda event: calculate())
+# Angezeigte, automatisch berechnete Woche (nur Info)
+ttk.Label(plant_info_frame, text="Pflanzenwoche (auto):").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+auto_week_label = ttk.Label(plant_info_frame, text="-", width=10)
+auto_week_label.grid(row=2, column=1, padx=5, pady=5, sticky="w")
 
-ttk.Label(plant_info_frame, text="Keimdatum:").grid(row=2, column=2, padx=5, pady=5, sticky="w") # Label für Datum
+ttk.Label(plant_info_frame, text="Keimdatum:").grid(row=2, column=2, padx=5, pady=5, sticky="w")
 germination_date_entry = ttk.Entry(plant_info_frame, state="readonly", width=12)
-germination_date_entry.grid(row=2, column=3, padx=5, pady=5, sticky="w") # Eigene Spalte für Datum
+germination_date_entry.grid(row=2, column=3, padx=5, pady=5, sticky="w")
+
+# Frame für manuelle Berechnungseinstellungen
+manual_calc_frame = ttk.LabelFrame(window, text="Berechnungsgrundlage")
+manual_calc_frame.grid(row=1, column=0, columnspan=3, padx=10, pady=5, sticky="ew")
+manual_calc_frame.columnconfigure(1, weight=1)
+manual_calc_frame.columnconfigure(3, weight=1)
+
+ttk.Label(manual_calc_frame, text="Phase:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+phase_var = tk.StringVar()
+phase_dropdown = ttk.Combobox(manual_calc_frame, textvariable=phase_var, values=list(PHASEN_WOCHEN.keys()), state="readonly")
+phase_dropdown.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+phase_dropdown.bind("<<ComboboxSelected>>", apply_preset)
+
+ttk.Label(manual_calc_frame, text="Woche für Berechnung:").grid(row=0, column=2, padx=5, pady=5, sticky="w")
+calc_week_var = tk.IntVar()
+calc_week_dropdown = ttk.Combobox(manual_calc_frame, textvariable=calc_week_var, values=list(range(1, 17)), state="readonly")
+calc_week_dropdown.grid(row=0, column=3, padx=5, pady=5, sticky="ew")
+calc_week_dropdown.bind("<<ComboboxSelected>>", lambda event: [calculate(), update_ec_value()])
+
 
 # Frame für Berechnungs-Inputs
 calc_input_frame = ttk.LabelFrame(window, text="Berechnung")
-calc_input_frame.grid(row=1, column=0, columnspan=3, padx=10, pady=5, sticky="ew")
+calc_input_frame.grid(row=2, column=0, columnspan=3, padx=10, pady=5, sticky="ew")
 calc_input_frame.columnconfigure(1, weight=1)
 
 ttk.Label(calc_input_frame, text="Wassermenge (Liter):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
 water_amount_entry = ttk.Entry(calc_input_frame, width=10)
 water_amount_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
-water_amount_entry.insert(0, "1.0") # Standardwert
+water_amount_entry.insert(0, "1.0")
 water_amount_entry.bind("<Return>", lambda event: calculate())
 
-# EC-Helper Button neben Wassermenge
 ec_button = ttk.Button(calc_input_frame, text="EC-Helper", command=ec_berechnen)
 ec_button.grid(row=0, column=2, padx=10, pady=5, sticky="e")
 
 # Frame für Düngerauswahl und Ergebnisse
 fertilizer_frame = ttk.LabelFrame(window, text="Düngerauswahl & Ergebnisse (ml)")
-fertilizer_frame.grid(row=2, column=0, columnspan=3, padx=10, pady=5, sticky="nsew") # Soll sich vertikal ausdehnen
-fertilizer_frame.columnconfigure(0, weight=1) # Checkbox-Spalte soll sich ausdehnen
-fertilizer_frame.columnconfigure(1, minsize=80) # Mindestbreite für Ergebnisse
-window.rowconfigure(2, weight=1) # Zeile 2 im Hauptfenster soll sich ausdehnen
+fertilizer_frame.grid(row=3, column=0, columnspan=3, padx=10, pady=5, sticky="nsew")
+fertilizer_frame.columnconfigure(0, weight=1)
+fertilizer_frame.columnconfigure(1, minsize=80)
+window.rowconfigure(3, weight=1)
 
 fertilizer_options = [
-    "CalMag - Substrate - Prevention", "CalMag - Substrate - Correction",
-    "GreenHome Wachstumsduenger - Substrate", "GreenHome Bluetenduenger - Substrate",
-    "Fish-Mix (5-1-4) - Substrate", "Root-Juice"
+    "Bio-Grow", "Bio-Bloom", "Top-Max", "Bio-Heaven", "Alg-A-Mic", "Acti-Vera",
+    "Root-Juice", "Fish-Mix", "CalMag - Prevention (Biobizz)", "CalMag - Correction (Biobizz)"
 ]
 fertilizer_vars = []
 checkboxes = []
@@ -662,35 +676,42 @@ for i, option in enumerate(fertilizer_options):
     var = tk.IntVar()
     fertilizer_vars.append(var)
 
-    # Verwende lambda mit Standardargumenten, um aktuelle Werte zu binden!
-    cmd = lambda opt=option, v=var: calculate(opt, v)
+    # Frame für Checkbox und eventuellen Hinweis
+    row_frame = ttk.Frame(fertilizer_frame)
+    row_frame.grid(row=i, column=0, sticky='w')
 
-    checkbox = ttk.Checkbutton(fertilizer_frame, text=option, variable=var, command=cmd)
-    checkbox.grid(row=i, column=0, padx=5, pady=2, sticky="w")
+    # Binde den Befehl mit Lambda, um die aktuellen Werte zu übergeben
+    cmd = lambda: calculate()
+
+    checkbox = ttk.Checkbutton(row_frame, text=option, variable=var, command=cmd)
+    checkbox.pack(side=tk.LEFT, padx=(5,0))
     checkboxes.append(checkbox)
 
-    result_label = ttk.Label(fertilizer_frame, text="", width=10, anchor="e") # Rechtsbündig
+    if option == "Fish-Mix":
+        info_label = ttk.Label(row_frame, text="(abweichend vom Schema)", font=('TkDefaultFont', 7))
+        info_label.pack(side=tk.LEFT, padx=5, anchor='w')
+
+    result_label = ttk.Label(fertilizer_frame, text="", width=10, anchor="e")
     result_label.grid(row=i, column=1, padx=5, pady=2, sticky="e")
     result_labels.append(result_label)
 
 # Frame für Infos
 info_frame = ttk.LabelFrame(window, text="Notizen zur Pflanze")
-info_frame.grid(row=3, column=0, columnspan=3, padx=10, pady=5, sticky="ew")
-info_frame.columnconfigure(0, weight=1) # Textfeld soll sich ausdehnen
+info_frame.grid(row=4, column=0, columnspan=3, padx=10, pady=5, sticky="ew")
+info_frame.columnconfigure(0, weight=1)
 
-info_text = scrolledtext.ScrolledText(info_frame, height=6, width=50, wrap=tk.WORD, state="disabled") # Start deaktiviert
+info_text = scrolledtext.ScrolledText(info_frame, height=6, width=50, wrap=tk.WORD, state="disabled")
 info_text.grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
 
-save_button = ttk.Button(info_frame, text="Infos speichern", command=save_info, state="disabled") # Start deaktiviert
-save_button.grid(row=1, column=1, padx=5, pady=5, sticky="e") # Rechts im Frame
+save_button = ttk.Button(info_frame, text="Infos speichern", command=save_info, state="disabled")
+save_button.grid(row=1, column=1, padx=5, pady=5, sticky="e")
 
-# Frame für Aktionen (Neue Pflanze, Löschen)
+# Frame für Aktionen
 action_frame = ttk.Frame(window)
-action_frame.grid(row=4, column=0, columnspan=3, padx=10, pady=10, sticky="e") # Rechtsbündig
+action_frame.grid(row=5, column=0, columnspan=3, padx=10, pady=10, sticky="e")
 
 neue_pflanze_button = ttk.Button(action_frame, text="Neue Pflanze anlegen", command=neue_pflanze_hinzufuegen)
 neue_pflanze_button.pack(side=tk.LEFT, padx=5)
-
 loeschen_button = ttk.Button(action_frame, text="Pflanze löschen", command=pflanze_loeschen)
 loeschen_button.pack(side=tk.LEFT, padx=5)
 
@@ -699,9 +720,9 @@ loeschen_button.pack(side=tk.LEFT, padx=5)
 plant_data = read_plant_data()
 plant_dropdown['values'] = list(plant_data.keys())
 if plant_data:
-    plant_var.set(list(plant_data.keys())[0]) # Erste Pflanze auswählen, falls vorhanden
-    update_week() # GUI initial befüllen
+    plant_var.set(list(plant_data.keys())[0])
+    update_week()
 else:
-    update_week() # Felder leeren, Buttons deaktivieren etc.
+    update_week()
 
 window.mainloop()
