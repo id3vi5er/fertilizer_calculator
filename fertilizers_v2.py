@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional # For type hinting
 # --- Konstanten ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_FILENAME = os.path.join(SCRIPT_DIR, 'pflanzendaten.csv')
-CSV_HEADER = ["Pflanzenname", "Keimdatum", "Genetik", "Infos"]
+CSV_HEADER = ["Pflanzenname", "Keimdatum", "Genetik", "Infos", "Bluetestart"]
 EC_FACTOR_WACHSTUM = 478 # EC increase in µS/cm per ml/L for Wachstumsdünger
 EC_FACTOR_BLUETE = 430   # EC increase in µS/cm per ml/L for Blütendünger
 
@@ -20,10 +20,11 @@ def read_plant_data() -> Dict[str, Dict[str, Any]]:
     """
     Liest die Pflanzendaten aus der CSV-Datei ein.
     Erstellt die Datei mit Kopfzeile, falls sie nicht existiert.
+    Ist abwärtskompatibel für CSV-Dateien ohne "Bluetestart"-Spalte.
 
     Returns:
         Ein Dictionary mit Pflanzennamen als Schlüssel und einem Dictionary
-        mit "Keimdatum" (datetime object), "Genetik" und "Infos" als Werte.
+        mit "Keimdatum", "Genetik", "Infos" und optional "Bluetestart" als Werte.
     """
     plant_data: Dict[str, Dict[str, Any]] = {}
     try:
@@ -31,45 +32,59 @@ def read_plant_data() -> Dict[str, Dict[str, Any]]:
             reader = csv.reader(csvfile)
             try:
                 header = next(reader)
-                if header != CSV_HEADER:
-                    print(f"Warnung: Unerwartete Kopfzeile in {CSV_FILENAME}: {header}")
-                    # Optional: Fehler auslösen oder Standard annehmen
+                # Prüfen, ob die gelesene Kopfzeile die neue Spalte enthält.
+                # CSV_HEADER ist jetzt immer die neue Version.
+                is_new_format = "Bluetestart" in header
             except StopIteration:
-                # Datei ist leer, sollte aber nicht passieren, wenn sie erstellt wurde
-                print(f"Warnung: CSV-Datei '{CSV_FILENAME}' ist leer oder enthält keine Kopfzeile.")
-                # Header neu schreiben?
-                # with open(CSV_FILENAME, 'w', newline='', encoding='utf-8') as outfile:
-                #    writer = csv.writer(outfile)
-                #    writer.writerow(CSV_HEADER)
-                return plant_data # Leeres Dictionary zurückgeben
+                return plant_data # Leere Datei
 
-            for i, row in enumerate(reader, start=2): # start=2 wegen Kopfzeile
-                if len(row) == len(CSV_HEADER):
-                    plant_name, germination_date_str, genetics, info = row
-                    try:
-                        # Datum in datetime Objekt umwandeln
-                        germination_date = datetime.strptime(germination_date_str, '%d.%m.%Y')
-                        if plant_name in plant_data:
-                             print(f"Warnung: Doppelter Pflanzenname '{plant_name}' in Zeile {i}. Überspringe.")
-                             continue
-                        plant_data[plant_name] = {
-                            "Keimdatum": germination_date,
-                            "Genetik": genetics,
-                            "Infos": info
-                        }
-                    except ValueError:
-                        print(f"Warnung: Ungültiges Datumsformat '{germination_date_str}' für Pflanze '{plant_name}' in Zeile {i}. Überspringe Eintrag.")
-                    except Exception as e:
-                        print(f"Fehler beim Verarbeiten der Zeile {i} für '{plant_name}': {row} - {e}. Überspringe Eintrag.")
-                else:
-                    print(f"Warnung: Zeile {i} hat unerwartete Spaltenanzahl ({len(row)} statt {len(CSV_HEADER)}). Überspringe: {row}")
+            for i, row in enumerate(reader, start=2):
+                if not row: continue # Leere Zeilen überspringen
+
+                try:
+                    plant_name, germination_date_str, genetics, info = None, None, None, None
+                    flowering_start_str = None
+
+                    # Basierend auf dem Format der gelesenen Datei parsen
+                    if is_new_format:
+                        if len(row) != 5:
+                            print(f"Warnung: Zeile {i} hat unerwartete Spaltenanzahl ({len(row)} für neues Format). Überspringe: {row}")
+                            continue
+                        plant_name, germination_date_str, genetics, info, flowering_start_str = row
+                    else: # altes Format
+                        if len(row) != 4:
+                            print(f"Warnung: Zeile {i} hat unerwartete Spaltenanzahl ({len(row)} für altes Format). Überspringe: {row}")
+                            continue
+                        plant_name, germination_date_str, genetics, info = row
+
+                    if plant_name in plant_data:
+                        print(f"Warnung: Doppelter Pflanzenname '{plant_name}' in Zeile {i}. Überspringe.")
+                        continue
+
+                    germination_date = datetime.strptime(germination_date_str, '%d.%m.%Y')
+
+                    flowering_start_date = None
+                    if flowering_start_str and flowering_start_str.strip():
+                        flowering_start_date = datetime.strptime(flowering_start_str, '%d.%m.%Y')
+
+                    plant_data[plant_name] = {
+                        "Keimdatum": germination_date,
+                        "Genetik": genetics,
+                        "Infos": info,
+                        "Bluetestart": flowering_start_date
+                    }
+
+                except ValueError as ve:
+                    print(f"Warnung: Ungültiges Datumsformat in Zeile {i} für Pflanze '{plant_name}'. Überspringe. Fehler: {ve}")
+                except Exception as e:
+                    print(f"Fehler beim Verarbeiten der Zeile {i} für '{plant_name}': {row} - {e}. Überspringe.")
 
     except FileNotFoundError:
-        print(f"Datei '{CSV_FILENAME}' nicht gefunden. Erstelle neue Datei.")
+        print(f"Datei '{CSV_FILENAME}' nicht gefunden. Erstelle neue Datei mit neuem Header.")
         try:
             with open(CSV_FILENAME, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.writer(csvfile)
-                writer.writerow(CSV_HEADER)
+                writer.writerow(CSV_HEADER) # Schreibt den neuen Header
             print(f"Datei '{CSV_FILENAME}' wurde erfolgreich erstellt.")
         except IOError as e:
             messagebox.showerror("Fehler beim Erstellen der Datei", f"Konnte CSV-Datei nicht erstellen:\n{e}")
@@ -83,24 +98,32 @@ def read_plant_data() -> Dict[str, Dict[str, Any]]:
 def save_plant_data_to_csv(data_to_save: Dict[str, Dict[str, Any]]):
     """
     Speichert das übergebene Pflanzendaten-Dictionary in die CSV-Datei.
-    Überschreibt die vorhandene Datei.
+    Überschreibt die vorhandene Datei immer im neuen Format mit 5 Spalten.
     """
     try:
         with open(CSV_FILENAME, 'w', newline='', encoding='utf-8') as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(CSV_HEADER)
+            writer.writerow(CSV_HEADER) # Schreibt immer den neuen Header
             for plant_name, data in data_to_save.items():
                 keimdatum_obj = data.get("Keimdatum")
-                if isinstance(keimdatum_obj, datetime):
-                    date_str = keimdatum_obj.strftime('%d.%m.%Y')
-                    writer.writerow([
-                        plant_name,
-                        date_str,
-                        data.get("Genetik", ""),
-                        data.get("Infos", "")
-                    ])
-                else:
-                    print(f"Warnung: Ungültiges oder fehlendes Keimdatum-Objekt für '{plant_name}' beim Speichern. Überspringe.")
+                if not isinstance(keimdatum_obj, datetime):
+                    print(f"Warnung: Ungültiges oder fehlendes Keimdatum für '{plant_name}'. Überspringe.")
+                    continue
+
+                keimdatum_str = keimdatum_obj.strftime('%d.%m.%Y')
+
+                bluetestart_obj = data.get("Bluetestart")
+                bluetestart_str = ""
+                if isinstance(bluetestart_obj, datetime):
+                    bluetestart_str = bluetestart_obj.strftime('%d.%m.%Y')
+
+                writer.writerow([
+                    plant_name,
+                    keimdatum_str,
+                    data.get("Genetik", ""),
+                    data.get("Infos", ""),
+                    bluetestart_str
+                ])
     except IOError as e:
          messagebox.showerror("Speicherfehler", f"Fehler beim Schreiben der CSV-Datei '{CSV_FILENAME}':\n{e}")
     except Exception as e:
@@ -208,6 +231,46 @@ def berechne_bluetenduenger_menge_fuer_ec(EC_ist: float, EC_soll: float, wasserm
 
 # --- GUI Callbacks und Hilfsfunktionen ---
 
+def save_bluetestart_date():
+    """Speichert das Datum für den Blütestart für die ausgewählte Pflanze."""
+    selected_plant = plant_var.get()
+    if not selected_plant:
+        messagebox.showwarning("Keine Pflanze ausgewählt", "Bitte zuerst eine Pflanze auswählen.")
+        return
+
+    date_str = bluetestart_date_entry.get().strip()
+
+    # Leere Eingabe löscht das Datum
+    if not date_str:
+        plant_data[selected_plant]["Bluetestart"] = None
+        save_plant_data_to_csv(plant_data)
+        update_week() # UI aktualisieren
+        messagebox.showinfo("Datum entfernt", f"Blütestart-Datum für '{selected_plant}' wurde entfernt.")
+        return
+
+    try:
+        new_date = datetime.strptime(date_str, '%d.%m.%Y')
+        germination_date = plant_data[selected_plant]["Keimdatum"]
+
+        if new_date < germination_date:
+            messagebox.showerror("Ungültiges Datum", "Das Blütestart-Datum darf nicht vor dem Keimdatum liegen.")
+            return
+
+        if new_date > datetime.now() + timedelta(days=1):
+             if not messagebox.askyesno("Datum in der Zukunft", "Das Datum liegt in der Zukunft. Möchten Sie es trotzdem speichern?"):
+                 return
+
+        plant_data[selected_plant]["Bluetestart"] = new_date
+        save_plant_data_to_csv(plant_data)
+        update_week() # UI aktualisieren
+        messagebox.showinfo("Gespeichert", f"Blütestart-Datum für '{selected_plant}' erfolgreich gespeichert.")
+
+    except ValueError:
+        messagebox.showerror("Ungültiges Format", "Bitte geben Sie das Datum im Format TT.MM.JJJJ ein.")
+    except Exception as e:
+        messagebox.showerror("Fehler beim Speichern", f"Das Datum konnte nicht gespeichert werden:\n{e}")
+
+
 def apply_preset(event=None):
     """Stellt die Checkboxen basierend auf der ausgewählten Phase ein."""
     selected_phase = phase_var.get()
@@ -231,59 +294,88 @@ def apply_preset(event=None):
 def update_week(event=None):
     """
     Aktualisiert die GUI-Felder basierend auf der ausgewählten Pflanze.
-    Setzt die Standardwerte für die manuelle Berechnung.
+    Bestimmt die Phase und Woche und setzt die Standardwerte für die Berechnung.
     """
     try:
         selected_plant = plant_var.get()
         if not selected_plant or selected_plant not in plant_data:
-            # Leere alle Felder, wenn keine Pflanze ausgewählt ist
+            # Leere und deaktiviere alle Felder
             auto_week_label.config(text="-")
             phase_var.set("")
             calc_week_var.set(0)
+
             germination_date_entry.config(state="normal")
             germination_date_entry.delete(0, tk.END)
             germination_date_entry.config(state="readonly")
+
+            bluetestart_date_entry.config(state="normal")
+            bluetestart_date_entry.delete(0, tk.END)
+            bluetestart_date_entry.config(state="disabled")
+            save_bluetestart_button.config(state="disabled")
+
             genetics_entry.config(state="normal")
             genetics_entry.delete(0, tk.END)
             genetics_entry.config(state="readonly")
+
             info_text.config(state="normal")
             info_text.delete("1.0", tk.END)
             info_text.config(state="disabled")
+
             ec_label.config(text="EC-Ziel (Erde): -")
             for label in result_labels:
                 label.config(text="")
             save_button.config(state="disabled")
             return
 
-        # Pflanze ausgewählt -> Felder füllen
+        # Pflanze ausgewählt -> Felder füllen und aktivieren
+        bluetestart_date_entry.config(state="normal")
+        save_bluetestart_button.config(state="normal")
+        info_text.config(state="normal")
+        save_button.config(state="normal")
+
         plant_info = plant_data[selected_plant]
         germination_date = plant_info["Keimdatum"]
-        today = datetime.today()
+        bluetestart_date = plant_info.get("Bluetestart")
+        today = datetime.now()
 
-        delta_days = (today - germination_date).days
-        current_week = max(1, (delta_days // 7 + 1))
-
-        # Info-Felder aktualisieren
-        auto_week_label.config(text=str(current_week))
+        # Info-Felder (Keimdatum, Genetik, etc.) aktualisieren
         germination_date_entry.config(state="normal")
         germination_date_entry.delete(0, tk.END)
         germination_date_entry.insert(0, germination_date.strftime('%d.%m.%Y'))
         germination_date_entry.config(state="readonly")
+
+        bluetestart_date_entry.delete(0, tk.END)
+        if isinstance(bluetestart_date, datetime):
+            bluetestart_date_entry.insert(0, bluetestart_date.strftime('%d.%m.%Y'))
+
         genetics_entry.config(state="normal")
         genetics_entry.delete(0, tk.END)
         genetics_entry.insert(0, plant_info["Genetik"])
         genetics_entry.config(state="readonly")
-        info_text.config(state="normal")
+
         info_text.delete("1.0", tk.END)
         info_text.insert("1.0", plant_info["Infos"])
-        save_button.config(state="normal")
+
+        # Logik zur Phasen- und Wochenbestimmung
+        current_phase = ""
+        display_week = 0
+
+        if bluetestart_date and today.date() >= bluetestart_date.date():
+            # Blütephase
+            current_phase = "Blüte"
+            delta_days = (today - bluetestart_date).days
+            display_week = max(1, (delta_days // 7) + 1)
+            auto_week_label.config(text=f"Blütewoche {display_week}")
+        else:
+            # Vegetative Phase
+            current_phase = "Vegetativ"
+            delta_days = (today - germination_date).days
+            display_week = max(1, (delta_days // 7 + 1))
+            auto_week_label.config(text=f"Veg. Woche {display_week}")
 
         # Standardwerte für manuelle Berechnung setzen
-        current_phase = "Blüte"  # Standard
-        if current_week in PHASEN_WOCHEN["Vegetativ"]:
-            current_phase = "Vegetativ"
         phase_var.set(current_phase)
-        calc_week_var.set(current_week)
+        calc_week_var.set(display_week)
 
         # Preset anwenden und Neuberechnung anstoßen
         apply_preset()
@@ -295,19 +387,29 @@ def update_week(event=None):
 
 def calculate(event=None):
     """
-    Berechnet die Düngermenge für ausgewählte Dünger und aktualisiert die Labels.
-    Wird durch Checkbox-Änderungen oder manuelle Auswahl ausgelöst.
+    Berechnet die Düngermenge basierend auf Phase und Woche aus der GUI.
+    Wendet die korrekte Logik für Veggie- vs. Blütewochen an.
     """
     try:
-        # Hole die Berechnungswoche aus dem neuen Dropdown-Menü
-        try:
-            week = calc_week_var.get()
-            if week == 0: # Passiert, wenn keine Pflanze ausgewählt ist
-                return
-        except (tk.TclError, ValueError):
-            # Variable ist noch nicht gesetzt oder leer
+        ui_week = calc_week_var.get()
+        phase = phase_var.get()
+
+        if ui_week == 0 or not phase:
             for result_label in result_labels:
                 result_label.config(text="")
+            return
+
+        # Ermittle die für das Düngeschema relevante Woche
+        schedule_week = 0
+        if phase == "Vegetativ":
+            # Veg-Woche 1 hat eigenes Schema (Root-Juice), danach gilt für alle > W1 das Schema von W2
+            schedule_week = 1 if ui_week == 1 else 2
+        elif phase == "Blüte":
+            # Blütewoche 1 entspricht Schema-Woche 3, BW 2 -> SW 4, etc.
+            schedule_week = ui_week + 2
+
+        if schedule_week <= 0:
+            # Sollte nicht passieren, aber als Sicherheitsnetz
             return
 
         water_amount_str = water_amount_entry.get()
@@ -323,7 +425,8 @@ def calculate(event=None):
             current_fertilizer_type = fertilizer_options[i]
 
             if f_var.get() == 1:
-                result = calculate_fertilizer_amount(week, water_amount, current_fertilizer_type)
+                # Benutze die umgerechnete schedule_week für die Berechnung
+                result = calculate_fertilizer_amount(schedule_week, water_amount, current_fertilizer_type)
                 if result is not None:
                     result_label.config(text=f"{result:.2f} ml")
                 else:
@@ -331,7 +434,7 @@ def calculate(event=None):
             else:
                 result_label.config(text="")
 
-    except ValueError:
+    except (ValueError, tk.TclError): # TclError fängt leere/ungültige IntVars ab
         for result_label in result_labels:
              result_label.config(text="")
     except Exception as e:
@@ -341,12 +444,27 @@ def calculate(event=None):
 def update_ec_value(event=None):
     """Berechnet und aktualisiert das EC-Zielwert-Label in der GUI."""
     try:
-        week = calc_week_var.get()
-        if week == 0:
+        ui_week = calc_week_var.get()
+        phase = phase_var.get()
+
+        if ui_week == 0 or not phase:
             ec_label.config(text="EC-Ziel (Erde): -")
             return
 
-        ec_value_ms = get_ec_value(week)
+        # Ermittle die für das Düngeschema relevante Woche (genauso wie in calculate())
+        schedule_week = 0
+        if phase == "Vegetativ":
+            # Veg-Woche 1 hat eigenes Schema, danach gilt für alle > W1 das Schema von W2
+            schedule_week = 1 if ui_week == 1 else 2
+        elif phase == "Blüte":
+            # Blütewoche 1 entspricht Schema-Woche 3, BW 2 -> SW 4, etc.
+            schedule_week = ui_week + 2
+
+        if schedule_week <= 0:
+            ec_label.config(text="EC-Ziel (Erde): -")
+            return
+
+        ec_value_ms = get_ec_value(schedule_week)
 
         if ec_value_ms is not None:
             ec_value_us = ec_value_ms * 1000
@@ -602,6 +720,7 @@ plant_info_frame = ttk.LabelFrame(window, text="Pflanzeninformationen")
 plant_info_frame.grid(row=0, column=0, columnspan=3, padx=10, pady=10, sticky="ew")
 plant_info_frame.columnconfigure(1, weight=1)
 
+# Zeile 0: Pflanzenauswahl
 ttk.Label(plant_info_frame, text="Pflanze:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
 plant_var = tk.StringVar()
 plant_dropdown = ttk.Combobox(plant_info_frame, textvariable=plant_var, state="readonly")
@@ -609,20 +728,29 @@ plant_dropdown.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
 plant_dropdown.bind("<<ComboboxSelected>>", update_week)
 
 ec_label = ttk.Label(plant_info_frame, text="EC-Ziel (Erde): -", font=('TkDefaultFont', 9, 'bold'))
-ec_label.grid(row=0, column=2, padx=10, pady=5, sticky="e")
+ec_label.grid(row=0, column=2, columnspan=3, padx=10, pady=5, sticky="e")
 
+# Zeile 1: Genetik
 ttk.Label(plant_info_frame, text="Genetik:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
 genetics_entry = ttk.Entry(plant_info_frame, state="readonly")
-genetics_entry.grid(row=1, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
+genetics_entry.grid(row=1, column=1, columnspan=3, padx=5, pady=5, sticky="ew")
 
-# Angezeigte, automatisch berechnete Woche (nur Info)
-ttk.Label(plant_info_frame, text="Pflanzenwoche (auto):").grid(row=2, column=0, padx=5, pady=5, sticky="w")
-auto_week_label = ttk.Label(plant_info_frame, text="-", width=10)
+# Zeile 2: Auto-Woche und Keimdatum
+ttk.Label(plant_info_frame, text="Status:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+auto_week_label = ttk.Label(plant_info_frame, text="-", font=('TkDefaultFont', 9, 'bold'))
 auto_week_label.grid(row=2, column=1, padx=5, pady=5, sticky="w")
 
-ttk.Label(plant_info_frame, text="Keimdatum:").grid(row=2, column=2, padx=5, pady=5, sticky="w")
+ttk.Label(plant_info_frame, text="Keimdatum:").grid(row=2, column=2, padx=5, pady=5, sticky="e")
 germination_date_entry = ttk.Entry(plant_info_frame, state="readonly", width=12)
 germination_date_entry.grid(row=2, column=3, padx=5, pady=5, sticky="w")
+
+# Zeile 3: Blütestart-Datum
+ttk.Label(plant_info_frame, text="Blütestart (TT.MM.JJJJ):").grid(row=3, column=0, padx=5, pady=5, sticky="w")
+bluetestart_date_entry = ttk.Entry(plant_info_frame, width=12)
+bluetestart_date_entry.grid(row=3, column=1, padx=5, pady=5, sticky="w")
+
+save_bluetestart_button = ttk.Button(plant_info_frame, text="Datum speichern", command=save_bluetestart_date)
+save_bluetestart_button.grid(row=3, column=3, padx=5, pady=5, sticky="w")
 
 # Frame für manuelle Berechnungseinstellungen
 manual_calc_frame = ttk.LabelFrame(window, text="Berechnungsgrundlage")
